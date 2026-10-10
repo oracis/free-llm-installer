@@ -117,6 +117,8 @@ def zen_model(model_id, name):
 FREE_MODELS = [
     kilo_model("kilo-auto/free", "Kilo Auto (Free)"),
     kilo_model("nvidia/nemotron-3-ultra-550b-a55b:free", "Nemotron 3 Ultra 550B (Free)"),
+    # ⚠️ step-5 读图能力真实，但 WorkBuddy 会把它路由到 StepFun BYOK（用你自己的 key），
+    # 撞 StepFun 账号 TPM 上限会 429。Kilo 直连才是真免费；WorkBuddy 里吃你自己的额度。
     kilo_model("stepfun/step-5-preview-free", "Step 5 Preview (Free)", supports_images=True),
     zen_model("space-bunny-free", "Space Bunny (Free)"),
 ]
