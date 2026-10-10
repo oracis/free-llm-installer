@@ -44,7 +44,6 @@ Windows 如果 `python` 不在 PATH，用 `py install_free_llms.py`。
 |---|---|---|---|---|
 | `kilo-auto/free` | Kilo Gateway | 256k | ✅ | ❌ |
 | `nvidia/nemotron-3-ultra-550b-a55b:free` | Kilo Gateway | 1000k | ✅ | ❌ |
-| `stepfun/step-5-preview-free` | Kilo Gateway | 1000k | ✅ | ✅ |
 | `space-bunny-free` | OpenCode Zen | — | ✅ | ✅ |
 
 - **Kilo Gateway**（`https://api.kilo.ai/api/gateway`）：免注册免 key，18 个免费模型，首选。
@@ -52,13 +51,7 @@ Windows 如果 `python` 不在 PATH，用 `py install_free_llms.py`。
   只有 `space-bunny-free` 还能从 API 直连。
 
 **kilo-auto/free 和 nemotron 是纯文本模型，不支持读图。** 读图请用
-`space-bunny-free`（Zen，真·免 key）或 `step-5-preview-free`（见下方 ⚠️）。
-
-> ⚠️ **`step-5-preview-free` 在 WorkBuddy 中不是「免 key 免费」**
-> WorkBuddy 会把这些模型 ID 走自身的 OpenRouter 后端代理；对 `stepfun/` 开头的模型，
-> 若你在 WorkBuddy 配了 StepFun key，则走 **BYOK（用你自己的 key）**，消耗的是你 StepFun 账号的 TPM 配额，
-> 撞上限会 429（分级限流，到点重置，不是永久封禁）。它的读图能力是真实的，但**「免费」只在 Kilo 直连时成立**；
-> WorkBuddy 实际路径会吃你自己的 StepFun 额度。真想要免 key 免费读图，用 `space-bunny-free`。
+`space-bunny-free`（Zen，真·免 key）。
 
 建议把 `kilo-auto/free` 设为默认——它会自动路由到当前可用的模型，
 某个模型挂了会自动切换，比绑定单个模型省心。
