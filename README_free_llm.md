@@ -10,7 +10,7 @@
 - 标支持工具调用的实际返回 400
 - 限流数字全是猜的，没有任何官方出处
 
-本包内置的 4 个模型是**逐个发真实请求（含 function calling）验证过的**，
+本包内置的 3 个模型是**逐个发真实请求（含 function calling）验证过的**，
 配置写进去就能用，不需要你自己再验一遍。
 
 ## 快速开始
@@ -25,7 +25,7 @@ python install_free_llms.py
 
 Windows 如果 `python` 不在 PATH，用 `py install_free_llms.py`。
 
-脚本会自动：备份配置 → 写入 4 个模型 → **发真实请求逐个验证** → 报告结果。
+脚本会自动：备份配置 → 写入 3 个模型 → **发真实请求逐个验证** → 报告结果。
 
 ### 方式二：装成WorkBuddy 技能（自动触发）
 
@@ -52,6 +52,13 @@ Windows 如果 `python` 不在 PATH，用 `py install_free_llms.py`。
 
 **kilo-auto/free 和 nemotron 是纯文本模型，不支持读图。** 读图请用
 `space-bunny-free`（Zen，真·免 key）。
+
+⚠️ **space-bunny-free 的免费额度绑在出口 IP 上，按 UTC 天重置（北京时间 08:00）。**
+    不需要 key，也不看 UA/Cookie——**同一 IP 下所有用户共享一份日额度**。
+    VPN / 代理 / 运营商 NAT 都可能让多人共用一个 IP，别人刷完你跟着锁。
+    429 报错带 `Retry-After`（秒），指到 UTC 00:00 就是额度重置时间。
+    证据：OpenCode Zen 维护者 GitHub issue #1659（同请求换出口 IP，429↔200）。
+    → 排查：`api.ipify.org` 看出口 IP；换网络/换 VPN 出口再试，变 200 就证实。
 
 建议把 `kilo-auto/free` 设为默认——它会自动路由到当前可用的模型，
 某个模型挂了会自动切换，比绑定单个模型省心。
@@ -128,8 +135,15 @@ python install_free_llms.py --watch --watch-rounds 1
 ## 常见问题
 
 **Q:429 报错怎么办？**
-免费池高峰限流，等几分钟重试。这不是配置错误。
-`--verify` 对 429 会自动重试 2 次。
+先看报错类型：
+
+- **`FreeUsageLimitError`（OpenCode Zen / space-bunny）**：额度绑在**出口 IP** 上，
+  按 UTC 天重置（北京时间 08:00）。同一 IP 下所有用户**共享一份日额度**——
+  VPN / 代理 / 运营商 NAT 都可能让多人共用一个 IP，别人刷完你跟着锁。
+  报错里带 `Retry-After`（秒），指到 UTC 00:00 就是重置时间。
+  排查：`api.ipify.org` 看出口 IP；换网络/换 VPN 出口再试，变 200 就证实。
+- **普通 429（Kilo 网关）**：免费池高峰限流，等几分钟重试。这不是配置错误。
+  `--verify` 对 429 会自动重试 2 次。
 
 **Q:401 / PAID_MODEL_AUTH_REQUIRED？**
 两个可能：① `apiKey` 写成了空串，应该用单空格 `" "`；

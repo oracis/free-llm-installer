@@ -16,6 +16,12 @@
 | nvidia/nemotron-3-ultra-550b-a55b:free | Kilo Gateway | ✅ | ❌ |
 | space-bunny-free              | OpenCode Zen | ✅ | ✅ |
 
+⚠️ space-bunny-free 的免费额度**绑在出口 IP 上，按 UTC 天重置**（北京时间 08:00）。
+    不需要 key，也不看 UA/Cookie——同一 IP 下所有用户**共享一份日额度**。
+    VPN / 代理 / 运营商 NAT 都可能让多人共用一个 IP，别人刷完你跟着锁。
+    429 报错带 `Retry-After`（秒），指到 UTC 00:00 就是额度重置时间。
+    证据：OpenCode Zen 维护者 GitHub issue #1659（同请求换出口 IP，429↔200）。
+
 关于 deepseek-v4-flash：需要你自己的 API Key，不在免密列表里，
 可用 `--deepseek-key sk-xxx` 单独添加。
 
