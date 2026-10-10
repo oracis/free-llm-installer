@@ -44,7 +44,7 @@ Windows 如果 `python` 不在 PATH，用 `py install_free_llms.py`。
 |---|---|---|---|---|
 | `kilo-auto/free` | Kilo Gateway | 256k | ✅ | ❌ |
 | `nvidia/nemotron-3-ultra-550b-a55b:free` | Kilo Gateway | 1000k | ✅ | ❌ |
-| `stepfun/step-5-preview-free` | Kilo Gateway | 1000k | ✅ | ❌ |
+| `stepfun/step-5-preview-free` | Kilo Gateway | 1000k | ✅ | ✅ |
 | `space-bunny-free` | OpenCode Zen | — | ✅ | ✅ |
 
 - **Kilo Gateway**（`https://api.kilo.ai/api/gateway`）：免注册免 key，18 个免费模型，首选。

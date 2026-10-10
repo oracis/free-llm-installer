@@ -14,7 +14,7 @@
 |---|---|---|---|
 | kilo-auto/free                | Kilo Gateway | ✅ | ❌ |
 | nvidia/nemotron-3-ultra-550b-a55b:free | Kilo Gateway | ✅ | ❌ |
-| stepfun/step-5-preview-free   | Kilo Gateway | ✅ | ❌ |
+| stepfun/step-5-preview-free   | Kilo Gateway | ✅ | ✅ |
 | space-bunny-free              | OpenCode Zen | ✅ | ✅ |
 
 关于 deepseek-v4-flash：需要你自己的 API Key，不在免密列表里，
@@ -75,7 +75,7 @@ REASONING = {
 }
 
 
-def kilo_model(model_id, name):
+def kilo_model(model_id, name, supports_images=False):
     """Kilo 网关模型。注意 id 必须是完整串，省略斜杠会导致 401。"""
     return {
         "id": model_id,
@@ -85,8 +85,11 @@ def kilo_model(model_id, name):
         # 单空格而非空串：空串会被宿主回落到平台 token 导致鉴权失败
         "apiKey": " ",
         "supportsToolCall": True,
-        # 实测 image_tokens=0 —— 模型接受图片请求但根本不看，写 true 会得到瞎猜的答案
-        "supportsImages": False,
+        # 默认不写读图：Kilo 上 kilo-auto/free 实测 image_tokens=0 且空回复，
+        # 模型接受图片请求但根本不看，写 true 会得到瞎猜的答案。
+        # 注意：image_tokens=0 在 Kilo 网关上不可靠（step-5 读了图但字段仍显示 0），
+        # 真正的判据是回复内容是否真的反映出图片信息。
+        "supportsImages": supports_images,
         "supportsReasoning": True,
         "reasoning": dict(REASONING),
     }
@@ -114,7 +117,7 @@ def zen_model(model_id, name):
 FREE_MODELS = [
     kilo_model("kilo-auto/free", "Kilo Auto (Free)"),
     kilo_model("nvidia/nemotron-3-ultra-550b-a55b:free", "Nemotron 3 Ultra 550B (Free)"),
-    kilo_model("stepfun/step-5-preview-free", "Step 5 Preview (Free)"),
+    kilo_model("stepfun/step-5-preview-free", "Step 5 Preview (Free)", supports_images=True),
     zen_model("space-bunny-free", "Space Bunny (Free)"),
 ]
 
