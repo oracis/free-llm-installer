@@ -2,8 +2,8 @@
 name: free-llm-installer
 slug: free-llm-installer
 displayName: 免费 LLM 一键安装
-version: 1.1.1
-description: 一键安装并实测验证已验证可用的免费 LLM 到 WorkBuddy/Claude Code，无需注册、无需 API Key。当用户说「装免费模型」「加免费模型」「免费 LLM」「免费模型一键装」「验证免费模型可用吗」「免费模型怎么接入」「帮我配几个免费模型」「监控免费模型」「免费模型挂了吗」「kilo 网关」「kilo-auto」「nemotron 免费」「space-bunny」「智谱 glm 免费」「zhipu 免费」「glm-4-flash」「glm-4.7-flash」「glm-z1-flash」「glm-4v-flash」「探测国外免费模型」「国外平台免费 llm」「优先用免费模型」时使用。也用于验证已有免费模型配置是否真的可用（tool calling 是否支持、是否限流、是否支持读图），以及定期 watch 监控免费模型是否下线/限流/失去工具调用能力。
+version: 1.1.2
+description: 一键安装并实测验证已验证可用的免费 LLM 到 WorkBuddy/Claude Code，无需注册、无需 API Key。当用户说「装免费模型」「加免费模型」「免费 LLM」「免费模型一键装」「验证免费模型可用吗」「免费模型怎么接入」「帮我配几个免费模型」「监控免费模型」「免费模型挂了吗」「kilo 网关」「kilo-auto」「nemotron 免费」「space-bunny」「智谱 glm 免费」「zhipu 免费」「glm-4-flash」「glm-4.7-flash」「glm-z1-flash」「glm-4v-flash」「探测国外免费模型」「国外平台免费 llm」「优先用免费模型」「读图桥接」「vision bridge」「给 glm-4-flash 加读图」「不读图的模型怎么看图」时使用。也用于验证已有免费模型配置是否真的可用（tool calling 是否支持、是否限流、是否支持读图），以及定期 watch 监控免费模型是否下线/限流/失去工具调用能力。
 agent_created: true
 ---
 
@@ -132,6 +132,47 @@ python scripts/install_free_llms.py --uninstall
 ```
 
 只移除本脚本添加的（按 `vendor` 识别），保留用户自己的模型。
+
+### 场景 F：给不读图的模型加读图桥接（MCP）
+
+**问题**：`glm-4-flash`（及多数免费文本模型）不读图，但 Claude Code 又依赖它的标准
+工具调用干活。智谱能读图的模型（`glm-4.1v-thinking-flash` 等）用的是自定义「文本框」
+伪工具调用（见上方踩坑表），**不能进 Claude Code 切换器**。
+
+**方案**：用 `tools/vision_bridge_mcp.py` 起一个 MCP server，提供 `read_image(path)` 工具。
+glm-4-flash 遇到图片路径时调 `read_image`，MCP 把图发给读图后端、回填文字描述——
+纯文本模型也能「看」图，且不破坏 agent 循环（比透明代理更安全、调试简单）。
+
+读图后端优先级（自动回退）：
+1. **智谱 `glm-4.1v-thinking-flash`**（免费，需 `ZHIPU_API_KEY`，质量最好）
+2. **Kilo Omni `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free`**（免 key，兜底）
+
+**部署步骤**：
+```bash
+# 1) （可选但推荐）设置智谱 key；不设置也能用，只是直接走 Kilo 兜底
+export ZHIPU_API_KEY=你的智谱key   # Windows: set ZHIPU_API_KEY=...
+
+# 2) 在 ~/.claude/settings.json（或某个 profile）注入 mcpServers：
+```
+```json
+{
+  "mcpServers": {
+    "vision-bridge": {
+      "command": "python",
+      "args": ["/绝对路径/free-llm-installer/tools/vision_bridge_mcp.py"]
+    }
+  }
+}
+```
+```bash
+# 3) 重启 Claude Code。对话里把图片本地路径给它，模型会经 read_image 自动看图。
+```
+
+- `command` 填 `python`（任意 Python 3 即可，脚本零依赖仅用标准库）；若 `python` 不在
+  PATH，改成绝对路径（如 Windows 隔离 python.exe）。
+- 想只在某些 profile 启用：把上面的 `mcpServers` 写进对应 `~/.claude/profiles/xxx.json`
+  即可，切换 profile 时自动带上/卸下。
+- 已内置容错：智谱过载/未配 key 会自动降级到 Kilo，不会让「看图」整体失败。
 
 ## 其他命令
 
