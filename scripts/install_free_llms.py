@@ -15,10 +15,11 @@
 | Kilo Gateway (免 key) | kilo-auto/free                | ✅ | ❌ | 自动路由，首选 |
 | Kilo Gateway (免 key) | nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free | ✅ | ✅ | 免费读图兜底 |
 | Kilo Gateway (免 key) | nvidia/nemotron-3-ultra-550b-a55b:free | ✅ | ❌ | 大模型 |
-| 智谱 BigModel (需 key·永久免费) | glm-4-flash        | ✅ | ❌ | 日常主力·最稳 |
 | 智谱 BigModel (需 key·免费)     | glm-4.7-flash      | ✅ | ❌ | 带推理·高峰易 429 |
 | 智谱 BigModel (需 key·免费)     | glm-z1-flash       | ❌ | ❌ | 纯推理(数学/代码)，不输出结构化工具 |
 | 智谱 BigModel (需 key·永久免费) | glm-4v-flash       | ❌ | ✅ | 免费读图·无工具 |
+| 智谱 BigModel (需 key·免费)     | glm-4.1v-thinking-flash | ❌ | ✅ | 视觉+推理最强，但工具调用是智谱自定义「文本框」格式(非标准 tool_calls)，不能用于 agent；读图实测可用 |
+| 智谱 BigModel (需 key·免费)     | glm-4.6v-flash     | ❌ | ✅ | 与 4.1v 同为视觉模型，但服务端极不稳定(实测连续 1305/500)，工具调用格式同为文本框。暂不可用，不加 |
 
 ⚠️ space-bunny-free (OpenCode Zen) 已于 2026-10-11 被上游封 API 直连（403
    "free tier can only be used from within OpenCode"），已从默认清单移除。
@@ -658,6 +659,13 @@ def build_targets(args):
                         supports_reasoning=True, supports_tool=False),
             zhipu_model("glm-4v-flash", "GLM-4V-Flash (Free·读图)",
                         supports_images=True, supports_tool=False),
+            # 4.1v-thinking-flash: 视觉+推理最强，但工具调用是智谱自定义「文本框」格式
+            # （<|begin_of_box|>...<|end_of_box|>），非标准 tool_calls → supports_tool=False。
+            # 仅 WorkBuddy 聊天/读图用，不进 Claude Code 切换器。
+            zhipu_model("glm-4.1v-thinking-flash", "GLM-4.1V-Thinking-Flash (Free·视觉推理)",
+                        supports_images=True, supports_reasoning=True, supports_tool=False),
+            # 4.6v-flash: 与 4.1v 同为视觉模型，但服务端极不稳定（实测连续 1305/500），
+            # 工具调用格式同为文本框。暂不可用，不加入默认清单。
         ]
     if args.deepseek_key:
         targets.append({

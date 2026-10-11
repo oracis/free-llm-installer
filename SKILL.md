@@ -28,6 +28,8 @@ agent_created: true
 | **Kilo 假 key 会 401** | `Bearer free`/`x`/`0` → 401 INVALID_TOKEN | Kilo 匿名 token 只有两个：空串和字面量 `anonymous`。占位一律用 `anonymous` |
 | **智谱免费档高峰过载** | glm-4.7-flash 高峰 429；glm-4.6v-flash 持续 1305「访问量过大」 | 日常用 `glm-4-flash`（永久免费·最稳）；`glm-4.7-flash` 非高峰用；`glm-4.6v-flash` 暂不可用 |
 | **推理模型吃 token** | max_tokens 太小 → 响应被截断成无 `choices` | 推理模型 verify/probe 时 `max_tokens` 给到 ≥400~600 |
+| **智谱视觉模型用「文本框」伪工具调用** | `glm-4.1v-thinking-flash` / `glm-4.6v-flash` 发 tools 请求 → `finish_reason=stop`、`tool_calls=None`，把调用写成 `<|begin_of_box|>get_time(city='北京')<|end_of_box|>` 文本 | 智谱自定义格式，**非标准 OpenAI tool_calls**，WorkBuddy/Claude Code 都读不了 → **不能用于 agent / 不能进切换器**。读图能力是真的（实测可识别颜色），仅限 WorkBuddy 纯聊天/读图用 |
+| **1×1 像素图被智谱拒** | 智谱视觉模型对极小图报 400「图片输入格式/解析错误」 | 用 ≥64×64 的正常图测读图，非模型问题 |
 
 ## 内置模型（2026-10-11 实测）
 
@@ -49,9 +51,11 @@ agent_created: true
 | `glm-4.7-flash` | 免费·高峰易 429 | ✅ | ❌ | ✅ | 带推理·质量更好 |
 | `glm-z1-flash` | 完全免费 | ❌ | ❌ | ✅ | 数学/代码推理，不输出结构化工具（仅聊天/推理用） |
 | `glm-4v-flash` | 永久免费 | ❌ | ✅ | ❌ | 免费读图，无工具（仅聊天/读图用） |
+| `glm-4.1v-thinking-flash` | 免费 | ❌ | ✅ | ✅ | 视觉+推理最强，但工具调用是智谱自定义「文本框」格式（非标准 tool_calls），**不能用于 agent / 不能进切换器**；读图实测可用（仅 WorkBuddy 聊天/读图用） |
+| `glm-4.6v-flash` | 免费·高峰持续 1305/500 | ❌ | ✅ | ❌ | 与 4.1v 同为视觉模型，但服务端极不稳定（实测连续 429→500→429），工具调用格式同为文本框。**暂不可用，不加** |
 
-> **Claude Code 切换器只放支持工具调用的模型**（glm-4-flash / glm-4.7-flash），
-> 因为 Claude Code 靠工具调用干活；z1/v 不加切换器（会断 agent 循环），仅 WorkBuddy 聊天用。
+> **Claude Code 切换器只放支持标准工具调用的模型**（`glm-4-flash` / `glm-4.7-flash`），
+> 因为 Claude Code 靠工具调用干活；z1/v/4.1v/4.6v 都不输出结构化 `tool_calls`，加切换器会断 agent 循环，仅 WorkBuddy 聊天/读图用。
 
 ### 已移除 / 不可用
 - `space-bunny-free`（OpenCode Zen）：2026-10-11 起上游 403 封 API 直连，暂不可用。
