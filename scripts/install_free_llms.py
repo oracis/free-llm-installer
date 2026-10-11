@@ -5,51 +5,58 @@
 
 背景
 ----
-市面上的「免费模型清单」大多不可信：标free 的实际要充值、标支持工具调用的实际返回 400、
-限流数字全是猜的。本脚本内置的4 个模型是逐个发真实请求（含 function calling）验证过的。
+市面上的「免费模型清单」大多不可信：标 free 的实际要充值、标支持工具调用的实际返回 400、
+限流数字全是猜的。本脚本内置的模型是逐个发真实请求（含 function calling）验证过的。
 
-实测结论（2026-10-10）
-----------------------
-| 模型 | 端点 | 工具调用 | 读图|
-|---|---|---|---|
-| kilo-auto/free                | Kilo Gateway | ✅ | ❌ |
-| nvidia/nemotron-3-ultra-550b-a55b:free | Kilo Gateway | ✅ | ❌ |
-| space-bunny-free              | OpenCode Zen | ✅ | ✅ |
+实测结论（2026-10-11 更新）
+--------------------------
+| 渠道 | 模型 | 工具调用 | 读图 | 备注 |
+|---|---|---|---|---|
+| Kilo Gateway (免 key) | kilo-auto/free                | ✅ | ❌ | 自动路由，首选 |
+| Kilo Gateway (免 key) | nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free | ✅ | ✅ | 免费读图兜底 |
+| Kilo Gateway (免 key) | nvidia/nemotron-3-ultra-550b-a55b:free | ✅ | ❌ | 大模型 |
+| 智谱 BigModel (需 key·永久免费) | glm-4-flash        | ✅ | ❌ | 日常主力·最稳 |
+| 智谱 BigModel (需 key·免费)     | glm-4.7-flash      | ✅ | ❌ | 带推理·高峰易 429 |
+| 智谱 BigModel (需 key·免费)     | glm-z1-flash       | ❌ | ❌ | 纯推理(数学/代码)，不输出结构化工具 |
+| 智谱 BigModel (需 key·永久免费) | glm-4v-flash       | ❌ | ✅ | 免费读图·无工具 |
 
-⚠️ space-bunny-free 的免费额度**绑在出口 IP 上，按 UTC 天重置**（北京时间 08:00）。
-    不需要 key，也不看 UA/Cookie——同一 IP 下所有用户**共享一份日额度**。
-    VPN / 代理 / 运营商 NAT 都可能让多人共用一个 IP，别人刷完你跟着锁。
-    429 报错带 `Retry-After`（秒），指到 UTC 00:00 就是额度重置时间。
-    证据：OpenCode Zen 维护者 GitHub issue #1659（同请求换出口 IP，429↔200）。
+⚠️ space-bunny-free (OpenCode Zen) 已于 2026-10-11 被上游封 API 直连（403
+   "free tier can only be used from within OpenCode"），已从默认清单移除。
+   若上游恢复，可手动加回。
 
-关于 deepseek-v4-flash：需要你自己的 API Key，不在免密列表里，
-可用 `--deepseek-key sk-xxx` 单独添加。
+关于 deepseek-v4-flash：需要你自己的付费 API Key，不在免密列表里，
+可用 `--deepseek-key sk-xxx` 单独添加（注意它是付费的，自动模式易烧钱）。
+
+国外平台探测（--probe-foreign）
+-------------------------------
+从国内网络直接访问多数国外平台（Groq / Together / HuggingFace / Mistral / Google）
+会被代理或 Cloudflare 拦截；唯一稳定可达且免 key 的是 **OpenRouter 的公开模型列表**，
+可拉到当前所有定价为 0 的免费模型。但这些模型实际调用仍需 OpenRouter API Key
+（本机账号若被封则无法调用）。OpenRouter 上与 Kilo 重合的 nemotron 系列已通过 Kilo 免 key 拿到。
 
 用法（按顺序挑一条就行）
 ------------------------
-    python install_free_llms.py              # 安装 + 自动验证（推荐）
-    python install_free_llms.py --verify     # 只重新验证已装的模型
-    python install_free_llms.py --list       # 列出当前已配置的模型
-    python install_free_llms.py --refresh    # 从服务端拉最新免费清单（自动补装）
-    python install_free_llms.py --watch      # 定期探测，模型状态一变就报告
-    python install_free_llms.py --uninstall  # 移除本脚本添加的模型
+    python install_free_llms.py                # 安装 Kilo 免 key 模型 + 自动验证
+    python install_free_llms.py --zhipu-key KEY   # 额外安装智谱 GLM 永久免费梯队
+    python install_free_llms.py --verify        # 只重新验证已装的模型
+    python install_free_llms.py --list          # 列出当前已配置的模型
+    python install_free_llms.py --report        # 一轮体检 + 国外免费模型探测（适合定时任务）
+    python install_free_llms.py --probe-foreign # 探测国外平台免费 LLM 可达性与清单
+    python install_free_llms.py --watch         # 定期探测，模型状态一变就报告
+    python install_free_llms.py --uninstall     # 移除本脚本添加的模型
 
-watch 模式（监控免费模型是否突然失效）
-------------------------------------------
+watch / report 模式（监控免费模型是否突然失效）
+------------------------------------------------
 免费模型没有 SLA，随时可能下线。--watch 定期探测并**只在状态变化时报告**：
 
     python install_free_llms.py --watch
     python install_free_llms.py --watch --watch-interval 600 --watch-rounds 12
 
-省额度设计：每轮对每个模型**只发 1 个请求**（verify 要2 个），
-这一个请求同时判定三件事——能否连通、是否支持 function calling、cost 是否仍为 0。
-4 个模型 = 4 请求/轮，30 分钟一轮 ≈ 每天 192 个请求，不会烧掉额度。
-
-状态变化同时写入日志（默认与配置同目录 free_llm_watch.log），便于接入通知脚本。
+省额度设计：每轮对每个模型**只发 1 个请求**（verify 要2 个）。
 状态取值 OK / NO_TOOL / RATELIMIT / DOWN / ERROR，
 其中「限流」和「不支持工具调用」不算故障。
 
-全程零依赖，只用Python 标准库。Python 3.7+ 均可。
+全程零依赖，只用 Python 标准库。Python 3.7+ 均可。
 """
 
 from __future__ import print_function
@@ -69,8 +76,9 @@ import urllib.request
 
 KILO_URL = "https://api.kilo.ai/api/gateway/v1/chat/completions"
 ZEN_URL = "https://opencode.ai/zen/v1/chat/completions"
+ZHIPU_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
 
-# Kilo 网关前面有 Cloudflare，按 User-Agent 拦截，必须带浏览器 UA
+# Kilo / Zen 前面有 Cloudflare，按 User-Agent 拦截，必须带浏览器 UA
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/120.0 Safari/537.36")
 
@@ -79,54 +87,61 @@ REASONING = {
     "supportedEfforts": ["minimal", "low", "medium", "high", "xhigh", "max"],
 }
 
+# 智谱 key 由 --zhipu-key 注入；不给 key 则不安装智谱模型
+ZHIPU_KEY = ""
 
-def kilo_model(model_id, name, supports_images=False):
+
+def kilo_model(model_id, name, supports_images=False, supports_reasoning=True):
     """Kilo 网关模型。注意 id 必须是完整串，省略斜杠会导致 401。"""
     return {
         "id": model_id,
         "name": name,
         "vendor": "Kilo Gateway",
         "url": KILO_URL,
-        # 单空格而非空串：空串会被宿主回落到平台 token 导致鉴权失败
-        "apiKey": " ",
+        # WorkBuddy >= 5.8.0 会把纯空白 apiKey 判为「未配置」直接禁用；
+        # Kilo 又拒绝一切假 key（401 INVALID_TOKEN），但实测接受字面量
+        # "anonymous"（200），trim 后非空可过客户端校验。见 SKILL.md 踩坑表。
+        "apiKey": "anonymous",
         "supportsToolCall": True,
-        # 默认不写读图：Kilo 上 kilo-auto/free 实测 image_tokens=0 且空回复，
-        # 模型接受图片请求但根本不看，写 true 会得到瞎猜的答案。
-        # 注意：image_tokens=0 在 Kilo 网关上不可靠（真读图的模型也可能显示 0），判据以回复内容为准。
-        # 真正的判据是回复内容是否真的反映出图片信息。
+        # Kilo 上 kilo-auto/free 实测 image_tokens=0 且空回复，模型接受图片请求
+        # 但根本不看，写 true 会得到瞎猜的答案。omni 模型经 base64 图实测可识别。
         "supportsImages": supports_images,
-        "supportsReasoning": True,
-        "reasoning": dict(REASONING),
+        "supportsReasoning": supports_reasoning,
+        "reasoning": dict(REASONING) if supports_reasoning else None,
     }
 
 
-def zen_model(model_id, name):
-    return {
+def zhipu_model(model_id, name, supports_images=False,
+                supports_reasoning=False, supports_tool=True):
+    """智谱 BigModel 模型（需 API Key，但免费梯队永久免费）。"""
+    m = {
         "id": model_id,
         "name": name,
-        "vendor": "OpenCode Zen",
-        "url": ZEN_URL,
-        "apiKey": " ",
-        "supportsToolCall": True,
-        # space-bunny-free 支持读图。
-        # 依据：用户实测 —— WorkBuddy 把 supportsImages 设为 false 时贴图，
-        # 端点返回 "Current model (custom-local:kilo-auto/free) does not support
-        # reading images"；设为 true 时贴图能识别成功。
-        # 之前写 false 是我误判，原因见下方踩坑记录。
-        "supportsImages": True,
-        "supportsReasoning": True,
-        "reasoning": dict(REASONING),
+        "vendor": "Zhipu AI",
+        "url": ZHIPU_URL,
+        "apiKey": ZHIPU_KEY,
+        "supportsToolCall": supports_tool,
+        "supportsImages": supports_images,
+        "supportsReasoning": supports_reasoning,
     }
+    if supports_reasoning:
+        m["reasoning"] = dict(REASONING)
+    return m
 
 
+# 默认安装的免 key 模型（Kilo 网关）
 FREE_MODELS = [
     kilo_model("kilo-auto/free", "Kilo Auto (Free)"),
-    kilo_model("nvidia/nemotron-3-ultra-550b-a55b:free", "Nemotron 3 Ultra 550B (Free)"),
-    zen_model("space-bunny-free", "Space Bunny (Free)"),
+    kilo_model("nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+               "Kilo Omni 读图 (Free)", supports_images=True),
+    kilo_model("nvidia/nemotron-3-ultra-550b-a55b:free",
+               "Nemotron 3 Ultra 550B (Free)"),
+    # space-bunny-free (OpenCode Zen) 2026-10-11 起上游 403 封直连，已移除。
+    # 智谱 GLM 系列需 key，放进 BUILD_EXTRA，由 --zhipu-key 触发。
 ]
 
 # 仅用于 --uninstall 识别归属，不影响安装
-OWNED_VENDORS = ("Kilo Gateway", "OpenCode Zen")
+OWNED_VENDORS = ("Kilo Gateway", "OpenCode Zen", "Zhipu AI")
 
 DEFAULT_MODELS_PATH = os.path.join(
     os.path.expanduser("~"), ".workbuddy", "models.json"
@@ -145,10 +160,10 @@ TOOLS = [{
     },
 }]
 
+
 # ---------------------------------------------------------------------------
 # 工具函数
 # ---------------------------------------------------------------------------
-
 
 def eprint(*a):
     print(*a, file=sys.stderr)
@@ -163,7 +178,6 @@ def find_models_path():
     for p in candidates:
         if os.path.isfile(p):
             return p
-    # 配置文件不存在时返回默认路径，让调用方决定是否创建
     return DEFAULT_MODELS_PATH
 
 
@@ -184,24 +198,20 @@ def load_models(path):
             % (path, e)
         )
     if isinstance(data, dict):
-        # 兼容 {models:[...]} 与 {模型id:{...}} 两种包装
         if isinstance(data.get("models"), list):
             data = data["models"]
         else:
-            #看起来是 {id: {...}} 映射，转成数组
             vals = list(data.values())
             if vals and all(isinstance(v, dict) for v in vals):
                 conv = []
-                for k, v in vals:
-                    m = dict(v)
-                    m.setdefault("id", k)
-                    conv.append(m)
+                for k, v in data.items():
+                    mm = dict(v)
+                    mm.setdefault("id", k)
+                    conv.append(mm)
                 data = conv
             else:
                 raise SystemExit(
-                    "[x] %s 的结构无法识别（既不是数组也不是 models 数组）。\n"
-                    "    拒绝写入，请手动检查。" % path
-                )
+                    "[x] %s 的结构无法识别。拒绝写入，请手动检查。" % path)
     if not isinstance(data, list):
         raise SystemExit("[x] %s 的结构不是数组，无法解析" % path)
     return [m for m in data if isinstance(m, dict)]
@@ -255,7 +265,6 @@ def _post(url, key, payload, timeout):
     except socket.timeout:
         return "FAIL", "超时（%ds 无响应）" % timeout
     except Exception as e:
-        # SSL 瞬时中断、连接重置等属于可重试的网络抖动
         return "NET", "%s: %s" % (type(e).__name__, str(e)[:110])
 
 
@@ -321,12 +330,17 @@ def call_tools(url, key, payload, timeout=60):
 
 
 def verify_model(m, retries=2):
-    """验证单个模型：纯对话能通+ 工具调用能命中。返回 (bool, 详情)。"""
+    """验证单个模型：纯对话能通 + (若声称支持工具) 工具调用能命中。
+
+    对明确标记 supportsToolCall=false 的模型（如 glm-z1-flash / glm-4v-flash）
+    只验证对话可用，不要求工具调用。
+    """
     url = m.get("url")
     key = m.get("apiKey", "")
     mid = m.get("id")
+    needs_tool = m.get("supportsToolCall", True)
 
-    # 1) 纯对话：只要有正常回复就算通过
+    # 1) 纯对话
     st, det = call(url, key, {
         "model": mid,
         "messages": [{"role": "user", "content": "只回答：好"}],
@@ -337,12 +351,15 @@ def verify_model(m, retries=2):
     if st != "OK":
         return False, "对话失败：%s" % det
 
-    # 2) 工具调用：429 常是瞬时 TPM 限流，重试几次
+    # 2) 工具调用（仅当模型声称支持时）
+    if not needs_tool:
+        return True, "对话OK（不要求工具调用）"
     payload = {
         "model": mid,
         "messages": [{"role": "user", "content": "北京天气？用get_weather 工具查"}],
         "tools": TOOLS,
-        "max_tokens": 200,
+        # 推理模型会先吐 reasoning 吃 token，给足避免截断成无 choices
+        "max_tokens": 600,
     }
     st, det, hit = call_tools(url, key, payload)
     tries = 0
@@ -363,17 +380,18 @@ def probe_once(m):
     只发**一个带 tools 的请求**，一次同时判定三件事：
       · 能不能连通（对话可用）
       · 支不支持 function calling（tool_calls 是否命中）
-      · cost 是否为 0（是否仍免费）
+      · 模型是否仍可用
 
-    相比 verify_model 的两次请求，省一半额度，适合高频轮询。
-    返回 (状态, 详情)，状态取值：
-      OK / NO_TOOL / RATELIMIT / DOWN / ERROR
+    对明确不支持工具的模型（supportsToolCall=false），未命中工具也判 OK。
+    返回 (状态, 详情)，状态取值：OK / NO_TOOL / RATELIMIT / DOWN / ERROR
     """
+    needs_tool = m.get("supportsToolCall", True)
     payload = {
         "model": m.get("id"),
         "messages": [{"role": "user", "content": "北京天气？用get_weather 工具查"}],
         "tools": TOOLS,
-        "max_tokens": 120,
+        # 推理模型给足 token，避免 reasoning 截断
+        "max_tokens": 400 if m.get("supportsReasoning") else 200,
     }
     st, det, hit = call_tools(m.get("url"), m.get("apiKey", ""), payload)
     if st == "RATELIMIT":
@@ -386,9 +404,87 @@ def probe_once(m):
         if "401" in det or "auth" in low:
             return "ERROR", "鉴权失败：%s" % det[:70]
         return "ERROR", det[:80]
-    if not hit:
+    if not hit and needs_tool:
         return "NO_TOOL", det[:70]
     return "OK", det
+
+
+# ---------------------------------------------------------------------------
+# 国外平台免费 LLM 探测
+# ---------------------------------------------------------------------------
+
+# (平台, 模型列表端点, 是否需 key, 可达性说明)
+FOREIGN_PLATFORMS = [
+    ("OpenRouter", "https://openrouter.ai/api/v1/models", False,
+     "国内可达，公开列表免 key；调用仍需 OpenRouter Key"),
+    ("Groq", "https://api.groq.com/openai/v1/models", True,
+     "需 key，国内常被 CF 拦"),
+    ("Together", "https://api.together.xyz/v1/models", True,
+     "需 key，国内常被 CF 拦"),
+    ("HuggingFace", "https://router.huggingface.co/api/v1/models", True,
+     "需 HF Token，国内常被代理 502"),
+    ("Mistral", "https://api.mistral.ai/v1/models", True,
+     "需 key，国内常不可达"),
+    ("Google AI", "https://generativelanguage.googleapis.com/v1beta/models", True,
+     "需 key，国内常不可达"),
+]
+
+
+def probe_foreign(verbose=False):
+    """探测国外平台免费 LLM：可达性 + 免 key 平台的免费清单。
+
+    返回 (reachable_hosts, openrouter_free_ids)。
+    """
+    print("=" * 74)
+    print("国外平台免费 LLM 探测（%s）" % time.strftime("%Y-%m-%d %H:%M:%S"))
+    print("=" * 74)
+    reachable = []
+    for name, url, needs_key, note in FOREIGN_PLATFORMS:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": UA})
+            r = urllib.request.urlopen(req, timeout=15)
+            code = r.status
+            ok = (code == 200)
+            tag = "可达" if ok else "可达但需鉴权(%d)" % code
+            reachable.append((name, True, tag, note))
+            print("  [%-12s] %s  %s" % (name, tag, note))
+        except urllib.error.HTTPError as e:
+            reachable.append((name, True, "可达但需鉴权(%d)" % e.code, note))
+            print("  [%-12s] 可达但需鉴权(%d)  %s" % (name, e.code, note))
+        except Exception as e:
+            reachable.append((name, False, "不可达(%s)" % type(e).__name__, note))
+            print("  [%-12s] 不可达  %s  | %s" % (name, note, str(e)[:60]))
+
+    # 重点：OpenRouter 免 key 公开列表，过滤定价为 0 的免费模型
+    print("\n--- OpenRouter 免 key 公开清单中的免费模型（定价=0）---")
+    free_ids = []
+    try:
+        req = urllib.request.Request(
+            "https://openrouter.ai/api/v1/models", headers={"User-Agent": UA})
+        data = json.loads(urllib.request.urlopen(req, timeout=30).read())
+        for m in data.get("data", []):
+            p = m.get("pricing") or {}
+            try:
+                pp = float(p.get("prompt", "1") or 0)
+                pc = float(p.get("completion", "1") or 0)
+            except (TypeError, ValueError):
+                continue
+            if pp == 0 and pc == 0:
+                free_ids.append(m["id"])
+        if free_ids:
+            free_ids.sort()
+            print("  共 %d 个免费模型：" % len(free_ids))
+            for fid in free_ids:
+                print("    - %s" % fid)
+        else:
+            print("  （未拉到免费模型）")
+    except Exception as e:
+        print("  OpenRouter 清单拉取失败：%s" % str(e)[:90])
+
+    print("\n说明：OpenRouter 免费模型实际调用仍需其 API Key；其中 "
+          "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free 与 "
+          "nvidia/nemotron-3-ultra-550b-a55b:free 已通过 Kilo 免 key 覆盖。")
+    return reachable, free_ids
 
 
 # ---------------------------------------------------------------------------
@@ -450,7 +546,7 @@ def do_watch(args):
         os.path.dirname(os.path.abspath(args.models)), "free_llm_watch.log")
 
     interval = max(60, args.watch_interval)
-    max_rounds = args.watch_rounds if args.watch_rounds > 0 else 0  # 0 = 无限
+    max_rounds = args.watch_rounds if args.watch_rounds > 0 else 0
 
     print("=" * 74)
     print("watch 模式：每 %d 秒探测一次，单请求/模型（省额度）" % interval)
@@ -462,39 +558,13 @@ def do_watch(args):
         print("本轮将跑 %d 轮后自动退出" % max_rounds)
     print("=" * 74)
 
-    ts = time.strftime("%Y-%m-%d %H:%M:%S")
-    print("\n[%s] 第1 轮探测" % ts)
     prev = _load_state(statefile)
-    cur = {}
-    alive = 0
-    for m in managed:
-        st, det = probe_once(m)
-        label, ok = WATCH_STATES.get(st, (st, False))
-        cur[m.get("id")] = {"status": st, "detail": det,
-                          "ts": time.strftime("%Y-%m-%d %H:%M:%S")}
-        if st == "OK":
-            alive += 1
-        old = (prev.get(m.get("id")) or {}).get("status")
-        mark = ""
-        if old and old != st:
-            mark = "  <<< 变了: %s -> %s" % (old, st)
-            _append_log(logfile, "[%s] %s: %s -> %s (%s)"
-                        % (time.strftime("%Y-%m-%d %H:%M:%S"),
-                           m.get("id"), old, st, det))
-        print("  %-40s %-22s %s" % (str(m.get("id"))[:40], label, mark))
-        sys.stdout.flush()
-        time.sleep(args.watch_gap)
-    _save_state(statefile, cur)
-    print("  → 可用 %d / %d" % (alive, len(managed)))
-
-    round_no = 1
+    round_no = 0
     try:
         while max_rounds == 0 or round_no < max_rounds:
-            time.sleep(interval)
             round_no += 1
             print("\n[%s] 第 %d 轮探测"
                   % (time.strftime("%Y-%m-%d %H:%M:%S"), round_no))
-            prev = cur
             cur = {}
             alive = 0
             changes = 0
@@ -508,19 +578,22 @@ def do_watch(args):
                 old = (prev.get(m.get("id")) or {}).get("status")
                 if old and old != st:
                     changes += 1
-                    print("  %-40s %-22s  <<< 变了: %s -> %s"
-                          % (str(m.get("id"))[:40], label, old, st))
+                    print("  %-46s %-22s  <<< 变了: %s -> %s"
+                          % (str(m.get("id"))[:46], label, old, st))
                     _append_log(logfile, "[%s] %s: %s -> %s (%s)"
                                 % (time.strftime("%Y-%m-%d %H:%M:%S"),
                                    m.get("id"), old, st, det))
                 else:
-                    print("  %-40s %-22s" % (str(m.get("id"))[:40], label))
+                    print("  %-46s %-22s" % (str(m.get("id"))[:46], label))
                 sys.stdout.flush()
                 time.sleep(args.watch_gap)
             _save_state(statefile, cur)
-            print("  → 可用 %d / %d%s"
+            print("  -> 可用 %d / %d%s"
                   % (alive, len(managed),
                      ("（%d 个变化）" % changes) if changes else "（无变化）"))
+            prev = cur
+            if max_rounds == 0 or round_no < max_rounds:
+                time.sleep(interval)
     except KeyboardInterrupt:
         print("\n已停止。状态文件保留在 %s" % statefile)
         return 0
@@ -555,7 +628,6 @@ def fetch_kilo_free_models():
 # 各子命令
 # ---------------------------------------------------------------------------
 
-
 def cmd_list(args):
     path = args.models
     models = load_models(path)
@@ -563,32 +635,41 @@ def cmd_list(args):
         print("配置文件为空或不存在：%s" % path)
         return 0
     print("配置文件：%s（共 %d 个模型）\n" % (path, len(models)))
-    print("%-42s %-16s %s" % ("MODEL ID", "VENDOR", "本脚本管理"))
+    print("%-46s %-14s %s" % ("MODEL ID", "VENDOR", "本脚本管理"))
     print("-" * 78)
     for m in models:
         owned = m.get("vendor") in OWNED_VENDORS
-        print("%-42s %-16s %s" % (
-            str(m.get("id"))[:42], str(m.get("vendor"))[:16],
+        print("%-46s %-14s %s" % (
+            str(m.get("id"))[:46], str(m.get("vendor"))[:14],
             "是" if owned else "-"))
     return 0
 
 
 def build_targets(args):
+    global ZHIPU_KEY
     targets = list(FREE_MODELS)
+    if args.zhipu_key:
+        ZHIPU_KEY = args.zhipu_key
+        targets += [
+            zhipu_model("glm-4-flash", "GLM-4-Flash (Free)"),
+            zhipu_model("glm-4.7-flash", "GLM-4.7-Flash (Free)",
+                        supports_reasoning=True),
+            zhipu_model("glm-z1-flash", "GLM-Z1-Flash (Free·推理)",
+                        supports_reasoning=True, supports_tool=False),
+            zhipu_model("glm-4v-flash", "GLM-4V-Flash (Free·读图)",
+                        supports_images=True, supports_tool=False),
+        ]
     if args.deepseek_key:
         targets.append({
             "id": "deepseek-v4-flash",
-            "name": "DeepSeek-V4 Flash",
+            "name": "DeepSeek-V4 Flash (付费)",
             "vendor": "DeepSeek",
             "url": "https://api.deepseek.com/chat/completions",
             "apiKey": args.deepseek_key,
             "supportsToolCall": True,
             "supportsImages": True,
             "supportsReasoning": True,
-            "reasoning": {
-                "defaultEffort": "high",
-                "supportedEfforts": ["minimal", "low", "medium", "high", "xhigh", "max"],
-            },
+            "reasoning": dict(REASONING),
         })
     return targets
 
@@ -609,10 +690,10 @@ def do_install(args, targets):
             idx = existing.index(cur)
             existing[idx] = t
             updated.append(t["id"])
-        elif cur.get("url") == t["url"]:
+        elif cur.get("url") == t["url"] and cur.get("apiKey") == t["apiKey"]:
             skipped.append(t["id"])
         else:
-            skipped.append("%s（URL 不同，保留你现有的）" % t["id"])
+            skipped.append("%s（URL/Key 不同，保留你现有的）" % t["id"])
 
     print("配置文件：%s" % path)
     print("新增 %d 个 · 覆盖 %d 个 · 跳过 %d 个\n"
@@ -642,20 +723,20 @@ def do_verify(args):
     models = load_models(path)
     managed = [m for m in models
                if isinstance(m, dict) and m.get("vendor") in OWNED_VENDORS]
-    if args.deepseek_key:
+    if args.deepseek_key or args.zhipu_key:
         managed = models
     if not managed:
         print("配置里没有本脚本管理的模型。先运行：python install_free_llms.py")
         return 1
 
-    print("验证 %d 个模型（发真实请求，各含一次 function calling）\n" % len(managed))
-    print("%-42s %-7s %s" % ("MODEL ID", "结果", "详情"))
+    print("验证 %d 个模型（发真实请求，含 function calling）\n" % len(managed))
+    print("%-46s %-7s %s" % ("MODEL ID", "结果", "详情"))
     print("-" * 100)
 
     passed, failed = [], []
     for m in managed:
         ok, det = verify_model(m)
-        print("%-42s %-7s %s" % (str(m.get("id"))[:42],
+        print("%-46s %-7s %s" % (str(m.get("id"))[:46],
                                 "OK" if ok else "FAIL", det[:50]))
         sys.stdout.flush()
         (passed if ok else failed).append(m.get("id"))
@@ -666,6 +747,43 @@ def do_verify(args):
         print("失败：%s" % ", ".join(failed))
         print("\n排查顺序：① 等几分钟再试（免费池高峰会限流）"
               " ② 看日志确认请求 URL 正确  ③ 该模型可能已下线")
+    return 0 if not failed else 2
+
+
+def do_report(args):
+    """一轮体检（验证全部托管模型）+ 国外免费模型探测，输出汇总。"""
+    path = args.models
+    models = load_models(path)
+    managed = [m for m in models
+               if isinstance(m, dict) and m.get("vendor") in OWNED_VENDORS]
+    if not managed:
+        print("配置里没有本脚本管理的模型。先运行：python install_free_llms.py")
+        return 1
+
+    print("=" * 74)
+    print("免费模型一周/每日体检（%s）" % time.strftime("%Y-%m-%d %H:%M:%S"))
+    print("=" * 74)
+    print("\n[1] 已装免费模型连通性 / 工具调用验证\n")
+    print("%-46s %-7s %s" % ("MODEL ID", "结果", "详情"))
+    print("-" * 100)
+    passed, failed = [], []
+    for m in managed:
+        ok, det = verify_model(m)
+        print("%-46s %-7s %s" % (str(m.get("id"))[:46],
+                                "OK" if ok else "FAIL", det[:46]))
+        sys.stdout.flush()
+        (passed if ok else failed).append(m.get("id"))
+        time.sleep(0.8)
+    print("\n通过 %d / %d" % (len(passed), len(managed)))
+
+    print("\n[2] 国外平台免费 LLM 探测")
+    probe_foreign()
+
+    print("\n[汇总]")
+    print("  本机免费模型：可用 %d / %d" % (len(passed), len(managed)))
+    if failed:
+        print("  异常：%s" % ", ".join(failed))
+        print("  → 多为高峰限流，稍后重跑 --verify 再判断；确属下线再清理。")
     return 0 if not failed else 2
 
 
@@ -736,7 +854,6 @@ def do_uninstall(args):
     if bk:
         print("\n备份：%s" % bk)
 
-    # 明确说明剩下的是什么，避免用户以为配置被清空
     if kept:
         print("\n保留的模型（%d 个，由你或其他工具管理）：" % len(kept))
         for m in kept:
@@ -748,20 +865,25 @@ def do_uninstall(args):
 
 # ---------------------------------------------------------------------------
 
-
 def main():
     ap = argparse.ArgumentParser(
         description="一键安装已实测可用的免费 LLM（免key、支持工具调用）",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="示例：\n"
                "  python install_free_llms.py\n"
+               "  python install_free_llms.py --zhipu-key sk-or-xxx\n"
                "  python install_free_llms.py --verify\n"
-               "  python install_free_llms.py --refresh\n",
+               "  python install_free_llms.py --report\n"
+               "  python install_free_llms.py --probe-foreign\n",
     )
     ap.add_argument("--models", help="models.json 路径（默认自动探测）")
     ap.add_argument("--verify", action="store_true", help="只验证已装模型")
     ap.add_argument("--list", action="store_true", help="列出已配模型")
     ap.add_argument("--refresh", action="store_true", help="拉最新免费清单并补装")
+    ap.add_argument("--report", action="store_true",
+                    help="一轮体检 + 国外免费模型探测（适合定时任务）")
+    ap.add_argument("--probe-foreign", action="store_true",
+                    help="探测国外平台免费 LLM 可达性与清单")
     ap.add_argument("--uninstall", action="store_true", help="移除本脚本添加的模型")
     ap.add_argument("--watch", action="store_true",
                     help="定期探测模型状态，变化时报告（Ctrl+C 退出）")
@@ -774,7 +896,8 @@ def main():
     ap.add_argument("--watch-log", help="变化日志文件路径（默认与配置同目录）")
     ap.add_argument("--dry-run", action="store_true", help="只看要做什么，不写文件")
     ap.add_argument("--force", action="store_true", help="覆盖同 id 的现有配置")
-    ap.add_argument("--deepseek-key", help="顺便添加 DeepSeek（需你自己的 Key）")
+    ap.add_argument("--zhipu-key", help="智谱 BigModel Key（安装 GLM 永久免费梯队）")
+    ap.add_argument("--deepseek-key", help="DeepSeek Key（注意是付费的）")
     args = ap.parse_args()
 
     socket.setdefaulttimeout(60)
@@ -785,6 +908,11 @@ def main():
         return cmd_list(args)
     if args.verify:
         return do_verify(args)
+    if args.report:
+        return do_report(args)
+    if args.probe_foreign:
+        probe_foreign()
+        return 0
     if args.refresh:
         return do_refresh(args)
     if args.uninstall:
@@ -801,7 +929,7 @@ def main():
     vrc = do_verify(args)
     if vrc == 0:
         print("\n全部可用。在 WorkBuddy 模型列表里即可选择。")
-        print("建议把 kilo-auto/free 设为默认——它会自动路由到当前可用的模型。")
+        print("建议日常用 GLM-4-Flash（永久免费最稳）或 kilo-auto/free（免 key）。")
     else:
         print("\n部分模型未通过。可用 --list 查看，"
               "或等高峰过后重跑 --verify 再判断。")

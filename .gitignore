@@ -1,1 +1,5 @@
-.workbuddy/memory/
+__pycache__/
+*.pyc
+*.log
+*.tmp
+.DS_Store
