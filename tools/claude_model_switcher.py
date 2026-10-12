@@ -39,8 +39,10 @@ MODELS = [
     ("GLM-4.7", "glm", None, ""),
     ("GLM-4-Flash（免费·稳定）", "glm4", None, ""),
     ("GLM-4-Flash + 读图桥接（免费）", "glm4-bridge", None, ""),
-    ("StepFun Step 5 (限时免费)", "stepfun", 3459,
+    ("StepFun Step 5 (推理·限时免费)", "stepfun", 3459,
      "--upstream https://api.stepfun.com/v1/chat/completions --model step-5-preview --key __STEPFUN_KEY__"),
+    ("StepFun Step 5 (无推理·限时免费)", "stepfun-nothink", 3460,
+     "--upstream https://api.stepfun.com/v1/chat/completions --model step-5-preview --key __STEPFUN_KEY__ --no-reasoning"),
 ]
 
 DETACHED = 0x00000008  # DETACHED_PROCESS
@@ -119,7 +121,7 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Claude 模型切换器")
-        self.geometry("420x680")
+        self.geometry("420x740")
         self.resizable(False, False)
         tk.Label(self, text="点哪个模型，就切到哪个\n切完重启 Claude Code 即可",
                  font=("Microsoft YaHei", 11), pady=6).pack()

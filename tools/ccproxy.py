@@ -67,6 +67,12 @@ DEFAULT_CONFIG = {
     # request is a pure ask-for-a-completion with no side effects.
     "retries": 2,
     "retry_backoff": 1.5,
+    # Some upstreams (StepFun step-5-preview notably) occasionally return a 200
+    # with an EMPTY content block and no tool calls -- a server-side quirk, not
+    # a transport fault. Retry that shape up to retry_empty extra times for
+    # non-streaming requests. Streaming is left alone (a committed chunk can't
+    # be un-sent). 0 disables the behaviour.
+    "retry_empty": 2,
     "verbose": False,
     # Forward Anthropic image content blocks to the upstream as OpenAI
     # image_url parts (data: URIs or http(s) URLs). When False, images are
@@ -74,6 +80,12 @@ DEFAULT_CONFIG = {
     # used by upstreams that cannot ingest multimodal content. Set False only
     # if a specific upstream rejects base64 images.
     "forward_images": True,
+    # Disable the upstream model's internal "thinking"/reasoning chain. Some
+    # reasoning models (e.g. StepFun step-5-preview) think by default and that
+    # dominates wall-clock latency. When True we send
+    #   chat_template_kwargs: {"enable_thinking": False}
+    # to the upstream so it answers directly. Harmless for non-reasoning models.
+    "no_reasoning": False,
     # Shared secret that local clients must present. Auto-generated on first
     # start so that no other local process can silently use the upstream
     # credential this gateway is configured with. Keep it in sync with the
@@ -374,6 +386,11 @@ def anthropic_to_openai(req):
         budget = th.get("budget_tokens") or 0
         out["reasoning_effort"] = "high" if budget >= 8000 else (
             "medium" if budget >= 2000 else "low")
+
+    # no_reasoning: force the upstream to skip its internal thinking chain.
+    # StepFun (vLLM-style) honours chat_template_kwargs.enable_thinking=false.
+    if CONFIG.get("no_reasoning"):
+        out["chat_template_kwargs"] = {"enable_thinking": False}
 
     out["messages"] = _repair_message_sequence(msgs)
 
@@ -1179,31 +1196,76 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if not want_stream:
-                # A non-streaming upstream can still die mid-body: it may
-                # promise a Content-Length and then reset the connection.
-                # ``resp.read()`` then blocks forever, the client never gets
-                # a reply and never sees an error, so the whole session
-                # stalls with no way to recover. Bound the read by the
-                # declared length and fail loudly instead of hanging.
-                try:
-                    raw_body = resp.read()
-                except Exception as e:
-                    log_always("upstream body read failed mid-flight: %s: %s"
-                               % (type(e).__name__, e))
-                    self._send_error_anthropic(
-                        502, "api_error",
-                        "upstream response was truncated: %s" % e)
-                    return
-                try:
-                    data = json.loads(raw_body.decode("utf-8"))
-                except Exception as e:
-                    log_always("upstream sent unparseable body: %s" % e)
-                    self._send_error_anthropic(
-                        502, "api_error",
-                        "upstream sent an invalid body: %s" % e)
-                    return
-                self._send_json(200, openai_to_anthropic(data, model_for_reply))
-                return
+                empty_retries = int(CONFIG.get("retry_empty", 0) or 0)
+                attempt = 0
+                while True:
+                    if resp.status != 200:
+                        detail = resp.read().decode("utf-8", "replace")[:800]
+                        log("upstream", resp.status, detail)
+                        _dump_failed_request(oa_req, req, resp.status, detail)
+                        kind = "authentication_error" if resp.status in (401, 403) else "api_error"
+                        self._send_error_anthropic(resp.status, kind,
+                                                   "upstream %s: %s" % (resp.status, detail))
+                        if conn:
+                            conn.close()
+                        return
+
+                    # A non-streaming upstream can still die mid-body: it may
+                    # promise a Content-Length and then reset the connection.
+                    # ``resp.read()`` then blocks forever, the client never
+                    # gets a reply and never sees an error, so the whole
+                    # session stalls with no way to recover. Bound the read by
+                    # the declared length and fail loudly instead of hanging.
+                    try:
+                        raw_body = resp.read()
+                    except Exception as e:
+                        log_always("upstream body read failed mid-flight: %s: %s"
+                                   % (type(e).__name__, e))
+                        self._send_error_anthropic(
+                            502, "api_error",
+                            "upstream response was truncated: %s" % e)
+                        if conn:
+                            conn.close()
+                        return
+                    try:
+                        data = json.loads(raw_body.decode("utf-8"))
+                    except Exception as e:
+                        log_always("upstream sent unparseable body: %s" % e)
+                        self._send_error_anthropic(
+                            502, "api_error",
+                            "upstream sent an invalid body: %s" % e)
+                        if conn:
+                            conn.close()
+                        return
+
+                    conv = openai_to_anthropic(data, model_for_reply)
+                    has_text = any(b.get("type") == "text" and str(b.get("text", "")).strip()
+                                   for b in conv.get("content", []))
+                    has_tool = any(b.get("type") == "tool_use" for b in conv.get("content", []))
+                    if (has_text or has_tool) or attempt >= empty_retries:
+                        if attempt and not (has_text or has_tool):
+                            log_always("empty upstream reply persisted after %d retries; "
+                                       "passing through" % empty_retries)
+                        self._send_json(200, conv)
+                        if conn:
+                            conn.close()
+                        return
+
+                    # StepFun flaky-empty quirk: 200 with no content. Retry.
+                    log_always("empty upstream reply (attempt %d/%d), retrying"
+                               % (attempt + 1, 1 + empty_retries))
+                    if conn:
+                        conn.close()
+                    attempt += 1
+                    try:
+                        conn, resp, _attempts = open_upstream_with_retry(oa_req)
+                    except Exception as e:
+                        log_always("upstream connect failed on empty-retry: %s: %s"
+                                   % (type(e).__name__, e))
+                        self._send_error_anthropic(
+                            502, "api_error", "upstream connect failed: %s" % e)
+                        return
+                return  # unreachable
 
             # ---- streaming ----
             self.send_response(200)
@@ -1320,6 +1382,13 @@ def main():
     ap.add_argument("--model")
     ap.add_argument("--key")
     ap.add_argument("--verbose", action="store_true")
+    ap.add_argument("--no-reasoning", action="store_true",
+                    help="Disable the upstream model's internal thinking chain "
+                         "(sends chat_template_kwargs.enable_thinking=false). "
+                         "Use for reasoning models that are too slow by default.")
+    ap.add_argument("--retry-empty", type=int,
+                    help="Retry an upstream 200 with empty content up to N extra "
+                         "times (StepFun flaky-empty workaround). Overrides config.")
     args = ap.parse_args()
 
     CONFIG = load_config()
@@ -1335,6 +1404,10 @@ def main():
         CONFIG["upstream"]["api_key"] = args.key
     if args.verbose:
         CONFIG["verbose"] = True
+    if args.no_reasoning:
+        CONFIG["no_reasoning"] = True
+    if args.retry_empty is not None:
+        CONFIG["retry_empty"] = max(0, args.retry_empty)
 
     ensure_client_token(CONFIG)
 
@@ -1351,6 +1424,9 @@ def main():
         sys.stderr.write("[ccproxy] upstream route: direct\n")
     sys.stderr.write("[ccproxy] upstream retries: %s (backoff %s)\n"
                      % (CONFIG.get("retries"), CONFIG.get("retry_backoff")))
+    if CONFIG.get("no_reasoning"):
+        sys.stderr.write("[ccproxy] reasoning DISABLED (no_reasoning: upstream gets "
+                         "chat_template_kwargs.enable_thinking=false)\n")
 
     host, port = CONFIG["host"], CONFIG["port"]
     srv = QuietThreadingHTTPServer((host, port), Handler)
