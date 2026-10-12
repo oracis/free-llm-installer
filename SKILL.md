@@ -245,6 +245,16 @@ python scripts/install_free_llms.py --stepfun-key <你的StepFun Key>
   重发，实测 5/5 稳定返回正文；流式不受重试保护。仍偶发空时换一次即可。
 - **`effortLevel: medium` / `forward_images: true`**：关重推理避免空 content，开图片转发。
 - StepFun 免费非永久，监控下线用 `--watch`（平台额度耗尽会变 401）。
+
+**桥接层专项优化（ccproxy 已内置，针对"推理模型很慢"）**：
+| 项 | 配置 | 作用 |
+|---|---|---|
+| Prompt Cache 头 | 对 stepfun.com 自动加 `Stepfun-Prompt-Cache: enable` | 缓存 system/上下文，第二轮起 TTFT 减半 |
+| 固定 `reasoning_effort` | `pin_reasoning_effort: "medium"` | **动态映射会让缓存永久 miss**；置空回退旧的按 thinking budget 推导 |
+| 缓存命中日志 | `log_cache_hit: true` + `include_usage: true` | 每次调用打印 `cached_tokens` 与 `HIT (x% cached)` / `MISS`，不用靠 TTFT 猜 |
+| 思考链回传 | `reasoning_to_thinking: true` | `reasoning_content` → Anthropic `thinking` 块；**不回传会让 Claude Code 工具调用异常** |
+| 大输入告警 | `warn_input_tokens: 80000` | 单轮输入超阈值 stderr 提示 `/clear` |
+| 流式透传 | — | 逐 chunk write+flush，**不预加载全量**（SSE 不被缓冲） |
 - WorkBuddy 直连 vs Claude Code 经 ccproxy：能力完全一致（都走官方 OpenAI 端点），区别仅在于
   Claude Code 多一层本地代理；代理已支持图片，无能力损失。
 
