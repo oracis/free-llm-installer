@@ -86,6 +86,11 @@ DEFAULT_CONFIG = {
     #   chat_template_kwargs: {"enable_thinking": False}
     # to the upstream so it answers directly. Harmless for non-reasoning models.
     "no_reasoning": False,
+    # Send the "Stepfun-Prompt-Cache: enable" request header on calls to
+    # api.stepfun.com. Without it StepFun does NOT cache, with it the fixed
+    # system prompt / long stable prefix is cached server-side (first round
+    # miss, later rounds hit, TTFT drops sharply). Ignored for other hosts.
+    "prompt_cache": True,
     # Shared secret that local clients must present. Auto-generated on first
     # start so that no other local process can silently use the upstream
     # credential this gateway is configured with. Keep it in sync with the
@@ -637,6 +642,10 @@ def upstream_request(oa_req, proxy_url=None):
     key = CONFIG["upstream"].get("api_key") or ""
     if key:
         headers["Authorization"] = "Bearer " + key
+    # StepFun prompt cache: the platform only caches when this header is set.
+    # A changing system/context defeats the cache regardless of the header.
+    if CONFIG.get("prompt_cache", True) and host and host.endswith("stepfun.com"):
+        headers["Stepfun-Prompt-Cache"] = "enable"
     body = json.dumps(oa_req, ensure_ascii=False).encode("utf-8")
     conn.request("POST", path, body=body, headers=headers)
     return conn, conn.getresponse()
@@ -1427,6 +1436,10 @@ def main():
     if CONFIG.get("no_reasoning"):
         sys.stderr.write("[ccproxy] reasoning DISABLED (no_reasoning: upstream gets "
                          "chat_template_kwargs.enable_thinking=false)\n")
+    _host = urlparse(CONFIG["upstream"]["url"]).hostname or ""
+    if CONFIG.get("prompt_cache", True) and _host.endswith("stepfun.com"):
+        sys.stderr.write("[ccproxy] stepfun prompt-cache header enabled "
+                         "(Stepfun-Prompt-Cache: enable)\n")
 
     host, port = CONFIG["host"], CONFIG["port"]
     srv = QuietThreadingHTTPServer((host, port), Handler)
