@@ -91,6 +91,21 @@ DEFAULT_CONFIG = {
     #   chat_template_kwargs: {"enable_thinking": False}
     # to the upstream so it answers directly. Harmless for non-reasoning models.
     "no_reasoning": False,
+    # Pin reasoning_effort to one value for every upstream call. Deriving it
+    # per request from the thinking budget makes the parameter flip between
+    # requests, and on StepFun a changed reasoning_effort invalidates the
+    # prompt cache permanently -> every turn re-prefills. Set "" to restore
+    # the old dynamic high/medium/low mapping.
+    "pin_reasoning_effort": "medium",
+    # Log the upstream usage block (notably prompt_tokens_details.cached_tokens)
+    # for every call, so prompt-cache hits are visible instead of inferred.
+    "log_cache_hit": True,
+    # Ask the upstream for a usage block on streamed responses. Required for
+    # log_cache_hit to report anything when stream=true. StepFun supports it.
+    "include_usage": True,
+    # Warn (stderr) when a single turn's estimated input exceeds this many
+    # tokens: past that point cache misses get expensive and /clear is cheaper.
+    "warn_input_tokens": 80000,
     # Send the "Stepfun-Prompt-Cache: enable" request header on calls to
     # api.stepfun.com. Without it StepFun does NOT cache, with it the fixed
     # system prompt / long stable prefix is cached server-side (first round
@@ -115,6 +130,34 @@ STOP_MAP = {
 }
 
 VALID_STOP = {"end_turn", "max_tokens", "stop_sequence", "tool_use", "pause_turn", "refusal"}
+
+
+def log_usage(usage):
+    """Print the upstream usage block, highlighting prompt-cache hits.
+
+    StepFun reports cached prompt tokens as
+    ``usage.prompt_tokens_details.cached_tokens``. Without this the only way
+    to tell whether the cache is working is to watch TTFT, which is noisy.
+    """
+    if not CONFIG.get("log_cache_hit", True) or not isinstance(usage, dict):
+        return
+    pt = usage.get("prompt_tokens")
+    ct = usage.get("completion_tokens")
+    det = usage.get("prompt_tokens_details") or {}
+    cached = det.get("cached_tokens")
+    if cached is None:
+        cached_pt = usage.get("cached_tokens")
+        cached = cached_pt
+    pct = ""
+    if cached is not None and pt:
+        try:
+            pct = " (%d%% cached)" % (100 * int(cached) / int(pt))
+        except (TypeError, ValueError, ZeroDivisionError):
+            pct = ""
+    sys.stderr.write("[ccproxy] usage: prompt=%s completion=%s cached=%s%s\n"
+                     % (pt, ct, cached if cached is not None else "?",
+                        " HIT" + pct if cached else " MISS"))
+    sys.stderr.flush()
 
 
 def log(*a):
@@ -391,11 +434,23 @@ def anthropic_to_openai(req):
             out["tool_choice"] = "auto"
 
     # Reasoning hints: map Anthropic's thinking budget onto reasoning_effort.
+    # Pinned by default (see pin_reasoning_effort): a value that changes from
+    # request to request defeats StepFun's prompt cache.
     th = req.get("thinking") or {}
     if isinstance(th, dict) and th.get("type") == "enabled":
-        budget = th.get("budget_tokens") or 0
-        out["reasoning_effort"] = "high" if budget >= 8000 else (
-            "medium" if budget >= 2000 else "low")
+        pinned = CONFIG.get("pin_reasoning_effort")
+        if pinned:
+            out["reasoning_effort"] = pinned
+        else:
+            budget = th.get("budget_tokens") or 0
+            out["reasoning_effort"] = "high" if budget >= 8000 else (
+                "medium" if budget >= 2000 else "low")
+
+    # Ask for a usage block on streamed responses so the prompt-cache hit can
+    # be logged. Not part of the prompt, so it cannot break the cache key.
+    if req.get("stream") and CONFIG.get("log_cache_hit", True) \
+            and CONFIG.get("include_usage", True):
+        out["stream_options"] = {"include_usage": True}
 
     # no_reasoning: force the upstream to skip its internal thinking chain.
     # StepFun (vLLM-style) honours chat_template_kwargs.enable_thinking=false.
@@ -1215,6 +1270,16 @@ class Handler(BaseHTTPRequestHandler):
         prompt_chars = sum(len(str(m.get("content", ""))) for m in oa_req["messages"])
         model_for_reply = req.get("model") or CONFIG["upstream"].get("model")
 
+        # Guide tip 6: a turn this large means the next cache miss is expensive
+        # and the context is probably stale. Tell the user to /clear.
+        _warn_at = CONFIG.get("warn_input_tokens") or 0
+        if _warn_at:
+            _est = estimate_tokens(" " * prompt_chars)
+            if _est > int(_warn_at):
+                log_always("LARGE INPUT: ~%d tokens (threshold %d) -- prompt "
+                           "cache misses are expensive at this size; consider "
+                           "/clear or trimming the session" % (_est, int(_warn_at)))
+
         conn = resp = None
         try:
             conn, resp, _attempts = open_upstream_with_retry(oa_req)
@@ -1281,6 +1346,7 @@ class Handler(BaseHTTPRequestHandler):
                             conn.close()
                         return
 
+                    log_usage(data.get("usage"))
                     conv = openai_to_anthropic(data, model_for_reply)
                     has_text = any(b.get("type") == "text" and str(b.get("text", "")).strip()
                                    for b in conv.get("content", []))
@@ -1328,6 +1394,7 @@ class Handler(BaseHTTPRequestHandler):
             # high-water mark and only replay while nothing has been emitted;
             # past that point failing loudly beats silently repeating.
             emitted = 0
+            last_usage = None
             mid_retries = CONFIG.get("retries", 0)
             try:
                 mid_retries = int(mid_retries)
@@ -1347,6 +1414,10 @@ class Handler(BaseHTTPRequestHandler):
                             chunk = json.loads(payload.decode("utf-8"))
                         except Exception:
                             continue
+                        # Guide tip 4: StepFun echoes usage on streamed chunks
+                        # when include_usage is on; keep the last block.
+                        if isinstance(chunk, dict) and chunk.get("usage"):
+                            last_usage = chunk["usage"]
                         out = tr.feed(chunk)
                         if out:
                             self.wfile.write(out)
@@ -1372,6 +1443,8 @@ class Handler(BaseHTTPRequestHandler):
                     time.sleep(delay)
                     conn, resp, _ = open_upstream_with_retry(oa_req)
 
+            if last_usage:
+                log_usage(last_usage)
             self.wfile.write(tr.finish())
             self.wfile.flush()
         except Exception as e:
@@ -1473,6 +1546,17 @@ def main():
     if CONFIG.get("reasoning_to_thinking", True):
         sys.stderr.write("[ccproxy] reasoning_content -> Anthropic thinking blocks "
                          "(injected back to client)\n")
+    _eff = CONFIG.get("pin_reasoning_effort")
+    sys.stderr.write("[ccproxy] reasoning_effort: %s (pinned; a changing value "
+                     "would invalidate the prompt cache)\n"
+                     % (_eff if _eff else "dynamic (from thinking budget)"))
+    if CONFIG.get("log_cache_hit", True):
+        sys.stderr.write("[ccproxy] cache_hit logging: ON (usage per upstream call"
+                         "%s)\n" % (", stream via stream_options.include_usage"
+                                    if CONFIG.get("include_usage", True) else ""))
+    sys.stderr.write("[ccproxy] upstream timeout %ss; streaming is chunk "
+                     "passthrough, no full-response preload\n"
+                     % CONFIG.get("timeout"))
     _host = urlparse(CONFIG["upstream"]["url"]).hostname or ""
     if CONFIG.get("prompt_cache", True) and _host.endswith("stepfun.com"):
         sys.stderr.write("[ccproxy] stepfun prompt-cache header enabled "
