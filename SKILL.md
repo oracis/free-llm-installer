@@ -32,6 +32,7 @@ agent_created: true
 | **1×1 像素图被智谱拒** | 智谱视觉模型对极小图报 400「图片输入格式/解析错误」 | 用 ≥64×64 的正常图测读图，非模型问题 |
 | **StepFun 空 content 偶发** | 推理模型个别 prompt 返回 `content` 为空（答案进了 `reasoning_content`） | 属低概率 flakiness，非必现；WorkBuddy 直连在 profile 设 `effortLevel: medium`（关重推理）最稳；ccproxy 转发时会带 `reasoning_effort` 映射，可缓解。本机连发 3 次 content 均正常（89/66/47 字） |
 | **ccproxy 现已转发图片（2026-10-12 修复）** | 旧版 ccproxy 把 Anthropic `image` 块直接丢成 `[image omitted]`，导致走 ccproxy 的模型（StepFun / omni 等）在 Claude Code 里**不能原生读图** | 新版 `ccproxy.py` 把 base64 / http(s) 图源转成 OpenAI `image_url` 块（配置 `forward_images: true`，默认开）。**一次修复解锁所有 ccproxy 路由模型的原生读图**。个别上游拒 base64 图时置 `forward_images: false` 回退旧行为 |
+| **profile 复用导致显示名≠实际后端（2026-10-12 踩到）** | 为省事直接复用 spacebunny 的 env 写 kilo-bridge profile，模型名写成 `space-bunny[1m]`；但 ccproxy 启动带 `--model kilo-auto/free` 会**无视请求里的模型名**、全部转发到 Kilo 免费网关 → Claude Code 横幅显示 `space-bunny` 而实际跑的是 kilo-auto/free，用户以为 space-bunny 挂了 | 显示名纯标签、不影响功能；**但在切换器 profile 里把模型名写成真实后端**（如 `kilo-auto/free[1m]`）即可消除混淆。ccproxy 日志第一行 `listening on ... -> <upstream> (kilo-auto/free)` 是判断实际后端的唯一权威来源 |
 
 ## 内置模型（2026-10-11 实测）
 
