@@ -58,7 +58,12 @@ DEFAULT_CONFIG = {
         # NOTE: NO_PROXY is never consulted.
         "proxy_strategy": "failover",
     },
-    "drop_reasoning": True,
+    # StepFun-style reasoning models answer with the thinking chain in
+    # ``reasoning_content``. Claude Code MUST see that chain or its tool-use
+    # loop misbehaves (it plans tool calls inside the thinking), so by default
+    # we translate it into Anthropic ``thinking`` blocks on the way back.
+    # Set false to strip it (saves context, but the model "forgets" its plan).
+    "reasoning_to_thinking": True,
     "timeout": 900,
     # Upstream retries for idempotent request shapes. Measured on2026-10-07:
     # a 183KB classifier payload takes the free endpoint 34-47s, and the
@@ -746,6 +751,11 @@ def openai_to_anthropic(resp, model):
     msg = choice.get("message") or {}
     content = []
 
+    # Reasoning chain first (Anthropic expects thinking blocks at the front).
+    rc = msg.get("reasoning_content")
+    if rc and CONFIG.get("reasoning_to_thinking", True):
+        content.append({"type": "thinking", "thinking": rc, "signature": ""})
+
     text = msg.get("content")
     if text:
         content.append({"type": "text", "text": text})
@@ -799,7 +809,8 @@ class StreamTranslator(object):
         self.msg_id = "msg_" + uuid.uuid4().hex[:24]
         self.input_tokens = estimate_tokens(" " * input_chars)
         self.out_chars = 0
-        self.blocks = []          # list of {"idx":int,"kind":"text"|"tool","open":bool}
+        self.blocks = []          # list of {"idx":int,"kind":"text"|"tool"|"thinking","open":bool}
+        self.think_idx = None
         self.text_idx = None
         self.tool_by_slot = {}    # upstream tool_call index -> our block index
         self.stop_reason = "end_turn"
@@ -822,6 +833,17 @@ class StreamTranslator(object):
                 "stop_sequence": None,
                 "usage": {"input_tokens": self.input_tokens, "output_tokens": 0},
             },
+        })
+
+    def _open_thinking(self):
+        if self.think_idx is not None:
+            return b""
+        idx = len(self.blocks)
+        self.think_idx = idx
+        self.blocks.append({"idx": idx, "kind": "thinking", "open": True})
+        return self.ev("content_block_start", {
+            "type": "content_block_start", "index": idx,
+            "content_block": {"type": "thinking", "thinking": ""},
         })
 
     def _open_text(self):
@@ -858,6 +880,18 @@ class StreamTranslator(object):
             return out
         ch = choices[0]
         delta = ch.get("delta") or {}
+
+        # Reasoning chain deltas -> Anthropic thinking block. Must be injected
+        # BEFORE any text/tool blocks so Claude Code sees the model's plan.
+        rc = delta.get("reasoning_content")
+        if rc and CONFIG.get("reasoning_to_thinking", True):
+            if self.think_idx is None:
+                out += self._open_thinking()
+            self.out_chars += len(rc)
+            out += self.ev("content_block_delta", {
+                "type": "content_block_delta", "index": self.think_idx,
+                "delta": {"type": "thinking_delta", "thinking": rc},
+            })
 
         text = delta.get("content")
         if text:
@@ -1436,6 +1470,9 @@ def main():
     if CONFIG.get("no_reasoning"):
         sys.stderr.write("[ccproxy] reasoning DISABLED (no_reasoning: upstream gets "
                          "chat_template_kwargs.enable_thinking=false)\n")
+    if CONFIG.get("reasoning_to_thinking", True):
+        sys.stderr.write("[ccproxy] reasoning_content -> Anthropic thinking blocks "
+                         "(injected back to client)\n")
     _host = urlparse(CONFIG["upstream"]["url"]).hostname or ""
     if CONFIG.get("prompt_cache", True) and _host.endswith("stepfun.com"):
         sys.stderr.write("[ccproxy] stepfun prompt-cache header enabled "
