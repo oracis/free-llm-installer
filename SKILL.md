@@ -2,7 +2,7 @@
 name: free-llm-installer
 slug: free-llm-installer
 displayName: 免费 LLM 一键安装
-version: 1.1.3
+version: 1.1.4
 description: 一键安装并实测验证已验证可用的免费 LLM 到 WorkBuddy/Claude Code，无需注册、无需 API Key。当用户说「装免费模型」「加免费模型」「免费 LLM」「免费模型一键装」「验证免费模型可用吗」「免费模型怎么接入」「帮我配几个免费模型」「监控免费模型」「免费模型挂了吗」「kilo 网关」「kilo-auto」「nemotron 免费」「space-bunny」「智谱 glm 免费」「zhipu 免费」「glm-4-flash」「glm-4.7-flash」「glm-z1-flash」「glm-4v-flash」「探测国外免费模型」「国外平台免费 llm」「优先用免费模型」「读图桥接」「vision bridge」「给 glm-4-flash 加读图」「不读图的模型怎么看图」「阶跃星辰」「stepfun」「step 5」「step-5-preview」「限时免费模型」「ccproxy 读图转发」「给 claude code 加读图」时使用。也用于验证已有免费模型配置是否真的可用（tool calling 是否支持、是否限流、是否支持读图），以及定期 watch 监控免费模型是否下线/限流/失去工具调用能力。
 agent_created: true
 ---
@@ -214,9 +214,15 @@ python scripts/install_free_llms.py --stepfun-key <你的StepFun Key>
 > 写入 `~/.claude-code-proxy.json` 的 `client_token` 字段，或启动日志里的 "generated a client token"）。
 > 每个安装实例不同，不要照抄别人的值，否则网关拒连（401 authentication_error）。
 ```bash
-# 3) 切换器按钮（tools/claude_model_switcher.pyw 已内置「StepFun Step 5 (限时免费)」，
+# 3) 切换器按钮（tools/claude_model_switcher.py 已内置「StepFun Step 5 (限时免费)」，
 #    port 3459；key 从环境变量 STEPFUN_API_KEY 读取，不写死在脚本里，避免随技能泄密）。
+#    启动：pythonw tools/claude_model_switcher.py  （Windows 双击也可，.cmd 启动器见仓库外本地副本）
 #    点按钮后重启 Claude Code 即可。
+#
+# 启动本地网关（Claude Code 走 ccproxy 时才需要，直连 WorkBuddy 不用）：
+#    python tools/ccproxy.py --port 3459 \
+#      --upstream https://api.stepfun.com/v1/chat/completions \
+#      --model step-5-preview --key $STEPFUN_API_KEY
 ```
 
 **关键注意（必读）**：
