@@ -68,6 +68,12 @@ DEFAULT_CONFIG = {
     "retries": 2,
     "retry_backoff": 1.5,
     "verbose": False,
+    # Forward Anthropic image content blocks to the upstream as OpenAI
+    # image_url parts (data: URIs or http(s) URLs). When False, images are
+    # dropped with a "[image omitted]" placeholder -- the legacy behaviour,
+    # used by upstreams that cannot ingest multimodal content. Set False only
+    # if a specific upstream rejects base64 images.
+    "forward_images": True,
     # Shared secret that local clients must present. Auto-generated on first
     # start so that no other local process can silently use the upstream
     # credential this gateway is configured with. Keep it in sync with the
@@ -197,6 +203,32 @@ def _text_of(content):
     return "\n".join(p for p in parts if p)
 
 
+def anthropic_image_to_openai_url(b):
+    """Convert an Anthropic ``image`` content block to an OpenAI ``image_url``
+    string (the value that goes into ``image_url.url``).
+
+    Supports ``base64`` sources (emitted as ``data:<media_type>;base64,<data>``)
+    and ``url`` sources (passed through). Returns "" when the block cannot be
+    interpreted, so callers can fall back to a textual placeholder instead of
+    raising -- upstreams vary wildly in the exact image block shape.
+    """
+    src = b.get("source") or {}
+    st = src.get("type")
+    if st == "base64":
+        media = src.get("media_type") or "image/png"
+        data = src.get("data") or ""
+        if not data:
+            return ""
+        return "data:%s;base64,%s" % (media, data)
+    if st == "url":
+        return src.get("url") or ""
+    # Tolerant of non-standard shapes that still carry a data field.
+    if "data" in src and src.get("data"):
+        media = src.get("media_type") or "image/png"
+        return "data:%s;base64,%s" % (media, src["data"])
+    return ""
+
+
 def anthropic_to_openai(req):
     """Anthropic Messages request -> OpenAI chat.completions request."""
     msgs = []
@@ -219,7 +251,11 @@ def anthropic_to_openai(req):
 
         # A user turn may carry tool_result blocks; OpenAI wants those as
         # separate role="tool" messages, so we split them out in order.
-        texts, tool_results, tool_calls = [], [], []
+        # Images are converted to OpenAI image_url parts (when forwarding is
+        # enabled) so multimodal upstreams can actually see them; without the
+        # patch they were silently dropped as "[image omitted]".
+        texts, tool_results, tool_calls, image_parts = [], [], [], []
+        fwd_img = bool(CONFIG.get("forward_images", True))
         for b in content:
             if not isinstance(b, dict):
                 texts.append(str(b))
@@ -232,13 +268,24 @@ def anthropic_to_openai(req):
             elif t == "tool_use":
                 tool_calls.append(b)
             elif t == "image":
+                if fwd_img:
+                    url = anthropic_image_to_openai_url(b)
+                    if url:
+                        image_parts.append(url)
+                        continue
                 texts.append("[image omitted]")
 
-        joined = "\n".join(x for x in texts if x)
+        plain_text = "\n".join(x for x in texts if x)
 
         if tool_results:
-            if joined:
-                msgs.append({"role": role, "content": joined})
+            if plain_text or image_parts:
+                ucontent = []
+                if plain_text:
+                    ucontent.append({"type": "text", "text": plain_text})
+                for url in image_parts:
+                    ucontent.append({"type": "image_url",
+                                     "image_url": {"url": url}})
+                msgs.append({"role": role, "content": ucontent})
             for tr in tool_results:
                 body = tr.get("content")
                 out = _text_of(body)
@@ -265,12 +312,23 @@ def anthropic_to_openai(req):
                     },
                 })
             msg = {"role": "assistant", "tool_calls": oa_calls}
-            if joined:
-                msg["content"] = joined
+            if plain_text or image_parts:
+                # assistant+tool_calls can only carry *text* content (OpenAI
+                # forbids a content array alongside tool_calls), so keep the
+                # text; images in a tool_use turn are dropped (rare, non-fatal).
+                msg["content"] = plain_text or ""
             msgs.append(msg)
             continue
 
-        msgs.append({"role": role, "content": joined})
+        if image_parts:
+            ucontent = []
+            if plain_text:
+                ucontent.append({"type": "text", "text": plain_text})
+            for url in image_parts:
+                ucontent.append({"type": "image_url", "image_url": {"url": url}})
+            msgs.append({"role": role, "content": ucontent})
+        else:
+            msgs.append({"role": role, "content": plain_text})
 
     out = {
         "model": CONFIG["upstream"].get("model", "unknown"),
@@ -367,6 +425,13 @@ def _repair_message_sequence(msgs):
         while out and out[-1].get("role") in ("user", "system"):
             tail.insert(0, out.pop())
         if tail:
+            # Multimodal user content (text + images) cannot be folded into a
+            # tool message without destroying the image parts, so keep it
+            # intact as a separate user message placed AFTER the tool results.
+            if any(isinstance(t.get("content"), list) for t in tail):
+                out.extend(run)
+                out.extend(tail)
+                continue
             text = "\n\n".join(
                 str(x.get("content", "")).strip() for x in tail
                 if str(x.get("content", "")).strip()

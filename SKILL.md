@@ -2,8 +2,8 @@
 name: free-llm-installer
 slug: free-llm-installer
 displayName: 免费 LLM 一键安装
-version: 1.1.2
-description: 一键安装并实测验证已验证可用的免费 LLM 到 WorkBuddy/Claude Code，无需注册、无需 API Key。当用户说「装免费模型」「加免费模型」「免费 LLM」「免费模型一键装」「验证免费模型可用吗」「免费模型怎么接入」「帮我配几个免费模型」「监控免费模型」「免费模型挂了吗」「kilo 网关」「kilo-auto」「nemotron 免费」「space-bunny」「智谱 glm 免费」「zhipu 免费」「glm-4-flash」「glm-4.7-flash」「glm-z1-flash」「glm-4v-flash」「探测国外免费模型」「国外平台免费 llm」「优先用免费模型」「读图桥接」「vision bridge」「给 glm-4-flash 加读图」「不读图的模型怎么看图」时使用。也用于验证已有免费模型配置是否真的可用（tool calling 是否支持、是否限流、是否支持读图），以及定期 watch 监控免费模型是否下线/限流/失去工具调用能力。
+version: 1.1.3
+description: 一键安装并实测验证已验证可用的免费 LLM 到 WorkBuddy/Claude Code，无需注册、无需 API Key。当用户说「装免费模型」「加免费模型」「免费 LLM」「免费模型一键装」「验证免费模型可用吗」「免费模型怎么接入」「帮我配几个免费模型」「监控免费模型」「免费模型挂了吗」「kilo 网关」「kilo-auto」「nemotron 免费」「space-bunny」「智谱 glm 免费」「zhipu 免费」「glm-4-flash」「glm-4.7-flash」「glm-z1-flash」「glm-4v-flash」「探测国外免费模型」「国外平台免费 llm」「优先用免费模型」「读图桥接」「vision bridge」「给 glm-4-flash 加读图」「不读图的模型怎么看图」「阶跃星辰」「stepfun」「step 5」「step-5-preview」「限时免费模型」「ccproxy 读图转发」「给 claude code 加读图」时使用。也用于验证已有免费模型配置是否真的可用（tool calling 是否支持、是否限流、是否支持读图），以及定期 watch 监控免费模型是否下线/限流/失去工具调用能力。
 agent_created: true
 ---
 
@@ -30,6 +30,8 @@ agent_created: true
 | **推理模型吃 token** | max_tokens 太小 → 响应被截断成无 `choices` | 推理模型 verify/probe 时 `max_tokens` 给到 ≥400~600 |
 | **智谱视觉模型用「文本框」伪工具调用** | `glm-4.1v-thinking-flash` / `glm-4.6v-flash` 发 tools 请求 → `finish_reason=stop`、`tool_calls=None`，把调用写成 `<|begin_of_box|>get_time(city='北京')<|end_of_box|>` 文本 | 智谱自定义格式，**非标准 OpenAI tool_calls**，WorkBuddy/Claude Code 都读不了 → **不能用于 agent / 不能进切换器**。读图能力是真的（实测可识别颜色），仅限 WorkBuddy 纯聊天/读图用 |
 | **1×1 像素图被智谱拒** | 智谱视觉模型对极小图报 400「图片输入格式/解析错误」 | 用 ≥64×64 的正常图测读图，非模型问题 |
+| **StepFun 空 content 偶发** | 推理模型个别 prompt 返回 `content` 为空（答案进了 `reasoning_content`） | 属低概率 flakiness，非必现；WorkBuddy 直连在 profile 设 `effortLevel: medium`（关重推理）最稳；ccproxy 转发时会带 `reasoning_effort` 映射，可缓解。本机连发 3 次 content 均正常（89/66/47 字） |
+| **ccproxy 现已转发图片（2026-10-12 修复）** | 旧版 ccproxy 把 Anthropic `image` 块直接丢成 `[image omitted]`，导致走 ccproxy 的模型（StepFun / omni 等）在 Claude Code 里**不能原生读图** | 新版 `ccproxy.py` 把 base64 / http(s) 图源转成 OpenAI `image_url` 块（配置 `forward_images: true`，默认开）。**一次修复解锁所有 ccproxy 路由模型的原生读图**。个别上游拒 base64 图时置 `forward_images: false` 回退旧行为 |
 
 ## 内置模型（2026-10-11 实测）
 
@@ -68,6 +70,7 @@ agent_created: true
 | **智谱 BigModel**（需 key） | GLM-4-Flash / GLM-4.7-Flash / GLM-Z1-Flash / GLM-4V-Flash | ✅ 永久/限时免费 | 文本/工具/推理/读图 | ✅ 直连 200 |
 | **Kilo 网关**（免 key） | kilo-auto/free / nemotron-omni / nemotron-550b | ✅ 稳定 | 文本/工具/读图(omni) | ✅ 307 |
 | **硅基流动 SiliconFlow**（需国内手机注册） | GLM 系列蒸馏 / DeepSeek-R1-Distill 等 | ✅ 免费·1K RPM | 文本为主 | 本机暂无 key |
+| **阶跃星辰 StepFun**（需 key，限时免费） | Step 5 Preview（1M ctx·多模态·工具调用·推理） | ✅ 限时免费（平台额度） | 文本/工具/读图/推理全开 | ✅ 直连 200（已实测） |
 | **OpenRouter**（需 key） | 19 个 `:free` 模型 | 列表可达·调用需 key | 多数文本 | ⚠️ 仅列表可达（用户账号被封则无法调用） |
 | Groq / Together / HF / Mistral / Google | 各有免费档 | ❌ 国内被 CF/代理封 | — | ❌ 不可达/需 key |
 
@@ -174,6 +177,58 @@ export ZHIPU_API_KEY=你的智谱key   # Windows: set ZHIPU_API_KEY=...
   即可，切换 profile 时自动带上/卸下。
 - 已内置容错：智谱过载/未配 key 会自动降级到 Kilo，不会让「看图」整体失败。
 
+### 场景 G：接入阶跃星辰 StepFun Step 5 Preview（限时免费·全能力）
+
+**特点**：`step-5-preview` 是阶跃星辰旗舰，**OpenAI 兼容**（`/v1/chat/completions`，`Bearer <key>`），
+支持 **1M 上下文 + 工具调用 + 多模态(base64 读图) + 推理**。免费 = **限时试用**（平台额度），
+非永久，重任务白嫖期可用，长期默认仍建议 glm-4-flash（永久免费）。本机已实测 tool_calls /
+base64 读图 / reasoning 全部可用。
+
+**接入三选一（推荐全做）**：
+
+```bash
+# 1) WorkBuddy models.json（直连，保留完整读图/工具/推理能力）
+python scripts/install_free_llms.py --stepfun-key <你的StepFun Key>
+#   会写入 id=step-5-preview、supportsToolCall/Images/Reasoning 全 true 的条目。
+#   不给 key 不会安装（与 --zhipu-key 同机制）。
+```
+
+```bash
+# 2) Claude Code profile（走 ccproxy 透明代理 → Anthropic 格式）
+#    在 ~/.claude/profiles/stepfun.json 写入（key 明文或环境变量）：
+```
+```json
+{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "<CCPROXY_CLIENT_TOKEN>",
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:3459",
+    "ANTHROPIC_MODEL": "step-5-preview",
+    "API_TIMEOUT_MS": "600000",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "1000000"
+  },
+  "model": "step-5-preview",
+  "modelSettings": { "step-5-preview": { "effortLevel": "medium" } }
+}
+```
+> `ANTHROPIC_AUTH_TOKEN` 必须填**你本机 ccproxy 生成的 client_token**（首次启动 ccproxy 时
+> 写入 `~/.claude-code-proxy.json` 的 `client_token` 字段，或启动日志里的 "generated a client token"）。
+> 每个安装实例不同，不要照抄别人的值，否则网关拒连（401 authentication_error）。
+```bash
+# 3) 切换器按钮（tools/claude_model_switcher.pyw 已内置「StepFun Step 5 (限时免费)」，
+#    port 3459；key 从环境变量 STEPFUN_API_KEY 读取，不写死在脚本里，避免随技能泄密）。
+#    点按钮后重启 Claude Code 即可。
+```
+
+**关键注意（必读）**：
+- **Claude Code 经 ccproxy 现在也能原生读图了**：本技能内置的 `ccproxy.py` 已修复图片转发
+  （2026-10-12），把 Anthropic `image` 块转成 OpenAI `image_url` 直发上游。所以 StepFun / omni
+  在 Claude Code 里贴图即看，无需 vision bridge 兜底。
+- 想用 vision bridge 给纯文本模型加读图，仍走场景 F；StepFun 自带读图，直接用即可。
+- **`effortLevel: medium` / `forward_images: true`**：关重推理避免空 content，开图片转发。
+- StepFun 免费非永久，监控下线用 `--watch`（平台额度耗尽会变 401）。
+- WorkBuddy 直连 vs Claude Code 经 ccproxy：能力完全一致（都走官方 OpenAI 端点），区别仅在于
+  Claude Code 多一层本地代理；代理已支持图片，无能力损失。
+
 ## 其他命令
 
 ```bash
@@ -182,6 +237,7 @@ python scripts/install_free_llms.py --dry-run             # 只看要做什么�
 python scripts/install_free_llms.py --force               # 覆盖同 id 的现有配置
 python scripts/install_free_llms.py --zhipu-key KEY      # 安装智谱 GLM 梯队
 python scripts/install_free_llms.py --deepseek-key sk-xxx # 顺便加 DeepSeek（付费！）
+python scripts/install_free_llms.py --stepfun-key KEY    # 安装阶跃星辰 Step 5 Preview（限时免费）
 python scripts/install_free_llms.py --models /path/to/models.json
 python scripts/install_free_llms.py --watch --watch-log /path/to/watch.log
 ```

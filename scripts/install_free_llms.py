@@ -78,6 +78,7 @@ import urllib.request
 KILO_URL = "https://api.kilo.ai/api/gateway/v1/chat/completions"
 ZEN_URL = "https://opencode.ai/zen/v1/chat/completions"
 ZHIPU_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+STEPFUN_URL = "https://api.stepfun.com/v1/chat/completions"
 
 # Kilo / Zen 前面有 Cloudflare，按 User-Agent 拦截，必须带浏览器 UA
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -142,7 +143,7 @@ FREE_MODELS = [
 ]
 
 # 仅用于 --uninstall 识别归属，不影响安装
-OWNED_VENDORS = ("Kilo Gateway", "OpenCode Zen", "Zhipu AI")
+OWNED_VENDORS = ("Kilo Gateway", "OpenCode Zen", "Zhipu AI", "StepFun")
 
 DEFAULT_MODELS_PATH = os.path.join(
     os.path.expanduser("~"), ".workbuddy", "models.json"
@@ -679,6 +680,20 @@ def build_targets(args):
             "supportsReasoning": True,
             "reasoning": dict(REASONING),
         })
+    if args.stepfun_key:
+        # 阶跃星辰 Step 5 Preview：OpenAI 兼容、Bearer 鉴权、支持工具调用+多模态+推理。
+        # 免费=限时试用（平台额度），非永久。经本机实测 tool_calls / base64 读图 / reasoning 均可用。
+        targets.append({
+            "id": "step-5-preview",
+            "name": "StepFun Step 5 Preview (限时免费)",
+            "vendor": "StepFun",
+            "url": STEPFUN_URL,
+            "apiKey": args.stepfun_key,
+            "supportsToolCall": True,
+            "supportsImages": True,
+            "supportsReasoning": True,
+            "reasoning": dict(REASONING),
+        })
     return targets
 
 
@@ -906,6 +921,7 @@ def main():
     ap.add_argument("--force", action="store_true", help="覆盖同 id 的现有配置")
     ap.add_argument("--zhipu-key", help="智谱 BigModel Key（安装 GLM 永久免费梯队）")
     ap.add_argument("--deepseek-key", help="DeepSeek Key（注意是付费的）")
+    ap.add_argument("--stepfun-key", help="阶跃星辰 StepFun Key（安装 Step 5 Preview，限时免费·支持工具调用/读图/推理）")
     args = ap.parse_args()
 
     socket.setdefaulttimeout(60)
