@@ -2,7 +2,7 @@
 name: free-llm-installer
 slug: free-llm-installer
 displayName: 免费 LLM 一键安装
-version: 1.1.6
+version: 1.1.7
 description: 一键安装并实测验证已验证可用的免费 LLM 到 WorkBuddy/Claude Code，无需注册、无需 API Key。当用户说「装免费模型」「加免费模型」「免费 LLM」「免费模型一键装」「验证免费模型可用吗」「免费模型怎么接入」「帮我配几个免费模型」「监控免费模型」「免费模型挂了吗」「kilo 网关」「kilo-auto」「nemotron 免费」「space-bunny」「智谱 glm 免费」「zhipu 免费」「glm-4-flash」「glm-4.7-flash」「glm-z1-flash」「glm-4v-flash」「探测国外免费模型」「国外平台免费 llm」「优先用免费模型」「读图桥接」「vision bridge」「给 glm-4-flash 加读图」「不读图的模型怎么看图」「阶跃星辰」「stepfun」「step 5」「step-5-preview」「限时免费模型」「ccproxy 读图转发」「给 claude code 加读图」时使用。也用于验证已有免费模型配置是否真的可用（tool calling 是否支持、是否限流、是否支持读图），以及定期 watch 监控免费模型是否下线/限流/失去工具调用能力。
 agent_created: true
 ---
