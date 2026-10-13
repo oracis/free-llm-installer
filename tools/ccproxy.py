@@ -78,6 +78,10 @@ DEFAULT_CONFIG = {
     # non-streaming requests. Streaming is left alone (a committed chunk can't
     # be un-sent). 0 disables the behaviour.
     "retry_empty": 2,
+    # Pause before re-sending a request that came back 200-but-empty. Kept
+    # short on purpose: the client (Claude Code) often has its own deadline,
+    # and a long wait here just burns it. 0 retries immediately.
+    "retry_empty_backoff": 0.5,
     "verbose": False,
     # Forward Anthropic image content blocks to the upstream as OpenAI
     # image_url parts (data: URIs or http(s) URLs). When False, images are
@@ -1366,6 +1370,9 @@ class Handler(BaseHTTPRequestHandler):
                     if conn:
                         conn.close()
                     attempt += 1
+                    _eb = float(CONFIG.get("retry_empty_backoff", 0.5) or 0)
+                    if _eb > 0:
+                        time.sleep(_eb)
                     try:
                         conn, resp, _attempts = open_upstream_with_retry(oa_req)
                     except Exception as e:

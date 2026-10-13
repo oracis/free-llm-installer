@@ -35,6 +35,7 @@ agent_created: true
 | **profile 复用导致显示名≠实际后端（2026-10-12 踩到）** | 为省事直接复用 spacebunny 的 env 写 kilo-bridge profile，模型名写成 `space-bunny[1m]`；但 ccproxy 启动带 `--model kilo-auto/free` 会**无视请求里的模型名**、全部转发到 Kilo 免费网关 → Claude Code 横幅显示 `space-bunny` 而实际跑的是 kilo-auto/free，用户以为 space-bunny 挂了 | 显示名纯标签、不影响功能；**但在切换器 profile 里把模型名写成真实后端**（如 `kilo-auto/free[1m]`）即可消除混淆。ccproxy 日志第一行 `listening on ... -> <upstream> (kilo-auto/free)` 是判断实际后端的唯一权威来源 |
 | **`kilo-auto/free` 是随机轮换池（2026-10-13 实测）** | 它会轮换免费模型，抽到重推理模型时 **7 分 30 秒只出 161 token** 就报错；同一 prompt 有时 3s 有时 7min | **不要用 auto 路由，锁定具体模型 id**（`liquid/lfm-2.5-2.6b:free` 实测 5/5 稳定、2-3.3s、agentic 两步全对，完胜 120B/550B 大模型）。代理参数无需动——问题在模型选择不在参数 |
 | **上下文窗口照抄大模型 → 400 爆上下文（2026-10-13 踩到）** | 给 64k 的 `liquid/lfm-2.5-2.6b:free` 填了 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000`（照抄 Step5 的 1M）→ Claude Code 以为有 1M，**从不触发自动压缩**，涨到 68918 才被上游拒：`maximum context length is 65536 tokens` | **按模型真实 ctx 填窗口**：先查上表 context_length，再设 `AUTO_COMPACT_WINDOW ≈ 真实值 - 8000`；同时设 `CLAUDE_CODE_MAX_OUTPUT_TOKENS=16000`（默认预留 32000 会白占一半预算）。例：LFM65536 → `56000` + `16000` |
+| **auto-mode 校验器跑在会话模型上 → 慢模型把工具全堵死（2026-10-13 踩到）** | Claude Code auto mode 的安全校验用**会话模型**判定 Bash/WebFetch 是否安全；会话模型是免费共享档时抖动超时，报 `X is temporarily unavailable (timed out), so auto mode cannot determine the safety of Bash`，**所有需审批动作全被卡死** | 三条路：① 会话模型换 DeepSeek 等稳定模型；② 用户级 settings 写 `"permissions": {"defaultMode": "default"}` 关掉 auto mode（**逐次手动确认，不调校验器**；只认用户级来源，项目级无效；切换器不碰这个键所以切模型不会丢）；③ 想让校验器用快模型得让桥接支持按模型名分流多上游——`CLAUDE_CODE_AUTO_MODE_MODEL` 这个env 存在但未公开，且 `ccproxy --model` 会强制覆盖所有模型名，设了也无效 |
 
 ## 内置模型（2026-10-11 实测）
 
@@ -276,6 +277,7 @@ python scripts/install_free_llms.py --stepfun-key <你的StepFun Key>
 | 思考链回传 | `reasoning_to_thinking: true` | `reasoning_content` → Anthropic `thinking` 块；**不回传会让 Claude Code 工具调用异常** |
 | 大输入告警 | `warn_input_tokens: 80000` | 单轮输入超阈值 stderr 提示 `/clear` |
 | 流式透传 | — | 逐 chunk write+flush，**不预加载全量**（SSE 不被缓冲） |
+| 重试退避 | `retry_backoff: 0.5` / `retry_empty_backoff: 0.5` | 连接失败重试与空回复重试的等待秒数。**别调大**——Claude Code 自己有截止时间，桥接侧干等只会烧掉它（免费模型抖动时更容易触发 auto-mode 校验超时） |
 - WorkBuddy 直连 vs Claude Code 经 ccproxy：能力完全一致（都走官方 OpenAI 端点），区别仅在于
   Claude Code 多一层本地代理；代理已支持图片，无能力损失。
 
