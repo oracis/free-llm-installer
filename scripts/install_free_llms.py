@@ -132,10 +132,17 @@ def zhipu_model(model_id, name, supports_images=False,
 
 
 # 默认安装的免 key 模型（Kilo 网关）
+#注意：kilo-auto/free 是**随机轮换池**（官方描述 "Rotates through available free
+# models"），会抽到重推理模型导致极慢（实测 7min/161token）。所以首选锁定具体模型。
 FREE_MODELS = [
-    kilo_model("kilo-auto/free", "Kilo Auto (Free)"),
+    kilo_model("liquid/lfm-2.5-2.6b:free",
+               "LFM2.5-2.6B (Free·快稳·agent首选)"),
     kilo_model("nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
                "Kilo Omni 读图 (Free)", supports_images=True),
+    kilo_model("kilo-auto/free",
+               "Kilo Auto 轮换池 (Free·可能很慢)", supports_reasoning=True),
+    kilo_model("nvidia/nemotron-3-super-120b-a12b:free",
+               "Nemotron 3 Super 120B (Free)"),
     kilo_model("nvidia/nemotron-3-ultra-550b-a55b:free",
                "Nemotron 3 Ultra 550B (Free)"),
     # space-bunny-free (OpenCode Zen) 2026-10-11 起上游 403 封直连，已移除。
@@ -953,7 +960,8 @@ def main():
     vrc = do_verify(args)
     if vrc == 0:
         print("\n全部可用。在 WorkBuddy 模型列表里即可选择。")
-        print("建议日常用 GLM-4-Flash（永久免费最稳）或 kilo-auto/free（免 key）。")
+        print("建议日常用 GLM-4-Flash（永久免费最稳）；Claude Code 干重活用 "
+              "liquid/lfm-2.5-2.6b:free（免费·快稳）。不要用 kilo-auto/free（随机轮换，可能极慢）。")
     else:
         print("\n部分模型未通过。可用 --list 查看，"
               "或等高峰过后重跑 --verify 再判断。")

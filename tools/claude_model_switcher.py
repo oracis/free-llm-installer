@@ -29,9 +29,12 @@ STEPFUN_KEY_FALLBACK = os.environ.get("STEPFUN_API_KEY", "")
 # name=显示名, profile=profiles 下文件名(无后缀), port=需要的本地代理端口(None=直连), args=代理启动参数
 # 含 __STEPFUN_KEY__ 的 args 会在启动时替换为真实 key
 MODELS = [
-    ("Kilo 文本（免费·无图）", "spacebunny", 3457,
+    # 锁定具体模型优于 kilo-auto/free 随机路由：后者会抽到重推理模型（实测 7min/161token）
+    ("Kilo LFM2.5（免费·agent首选）", "kilo-fast", 3461,
+     "--upstream https://api.kilo.ai/api/gateway/v1/chat/completions --model liquid/lfm-2.5-2.6b:free --key anonymous"),
+    ("Kilo 随机轮换（免费·可能很慢）", "spacebunny", 3457,
      "--upstream https://api.kilo.ai/api/gateway/v1/chat/completions --model kilo-auto/free --key anonymous"),
-    ("Kilo 文本 + 读图桥接（免费）", "kilo-bridge", 3457,
+    ("Kilo 随机轮换+读图桥接（免费）", "kilo-bridge", 3457,
      "--upstream https://api.kilo.ai/api/gateway/v1/chat/completions --model kilo-auto/free --key anonymous"),
     ("读图 Vision（免费·可看图）", "vision", 3458,
      "--upstream https://api.kilo.ai/api/gateway/v1/chat/completions --model nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free --key anonymous"),
@@ -121,7 +124,7 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Claude 模型切换器")
-        self.geometry("420x740")
+        self.geometry("420x820")
         self.resizable(False, False)
         tk.Label(self, text="点哪个模型，就切到哪个\n切完重启 Claude Code 即可",
                  font=("Microsoft YaHei", 11), pady=6).pack()

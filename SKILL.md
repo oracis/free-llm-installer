@@ -2,7 +2,7 @@
 name: free-llm-installer
 slug: free-llm-installer
 displayName: 免费 LLM 一键安装
-version: 1.1.5
+version: 1.1.6
 description: 一键安装并实测验证已验证可用的免费 LLM 到 WorkBuddy/Claude Code，无需注册、无需 API Key。当用户说「装免费模型」「加免费模型」「免费 LLM」「免费模型一键装」「验证免费模型可用吗」「免费模型怎么接入」「帮我配几个免费模型」「监控免费模型」「免费模型挂了吗」「kilo 网关」「kilo-auto」「nemotron 免费」「space-bunny」「智谱 glm 免费」「zhipu 免费」「glm-4-flash」「glm-4.7-flash」「glm-z1-flash」「glm-4v-flash」「探测国外免费模型」「国外平台免费 llm」「优先用免费模型」「读图桥接」「vision bridge」「给 glm-4-flash 加读图」「不读图的模型怎么看图」「阶跃星辰」「stepfun」「step 5」「step-5-preview」「限时免费模型」「ccproxy 读图转发」「给 claude code 加读图」时使用。也用于验证已有免费模型配置是否真的可用（tool calling 是否支持、是否限流、是否支持读图），以及定期 watch 监控免费模型是否下线/限流/失去工具调用能力。
 agent_created: true
 ---
@@ -33,15 +33,28 @@ agent_created: true
 | **StepFun 空 content 偶发** | 推理模型个别 prompt 返回 `content` 为空（答案进了 `reasoning_content`），`stop=max_tokens`、0 字 | 属低概率 flakiness，非必现；**ccproxy 已加空回复自动重试（`retry_empty` 默认 2）**，非流式请求空回复自动重发，实测 5/5 稳定返回正文；仍偶发空时换一次即可。WorkBuddy 直连在 profile 设 `effortLevel: medium` 也最稳 |
 | **ccproxy 现已转发图片（2026-10-12 修复）** | 旧版 ccproxy 把 Anthropic `image` 块直接丢成 `[image omitted]`，导致走 ccproxy 的模型（StepFun / omni 等）在 Claude Code 里**不能原生读图** | 新版 `ccproxy.py` 把 base64 / http(s) 图源转成 OpenAI `image_url` 块（配置 `forward_images: true`，默认开）。**一次修复解锁所有 ccproxy 路由模型的原生读图**。个别上游拒 base64 图时置 `forward_images: false` 回退旧行为 |
 | **profile 复用导致显示名≠实际后端（2026-10-12 踩到）** | 为省事直接复用 spacebunny 的 env 写 kilo-bridge profile，模型名写成 `space-bunny[1m]`；但 ccproxy 启动带 `--model kilo-auto/free` 会**无视请求里的模型名**、全部转发到 Kilo 免费网关 → Claude Code 横幅显示 `space-bunny` 而实际跑的是 kilo-auto/free，用户以为 space-bunny 挂了 | 显示名纯标签、不影响功能；**但在切换器 profile 里把模型名写成真实后端**（如 `kilo-auto/free[1m]`）即可消除混淆。ccproxy 日志第一行 `listening on ... -> <upstream> (kilo-auto/free)` 是判断实际后端的唯一权威来源 |
+| **`kilo-auto/free` 是随机轮换池（2026-10-13 实测）** | 它会轮换免费模型，抽到重推理模型时 **7 分 30 秒只出 161 token** 就报错；同一 prompt 有时 3s 有时 7min | **不要用 auto 路由，锁定具体模型 id**（`liquid/lfm-2.5-2.6b:free` 实测 5/5 稳定、2-3.3s、agentic 两步全对，完胜 120B/550B 大模型）。代理参数无需动——问题在模型选择不在参数 |
+| **上下文窗口照抄大模型 → 400 爆上下文（2026-10-13 踩到）** | 给 64k 的 `liquid/lfm-2.5-2.6b:free` 填了 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000`（照抄 Step5 的 1M）→ Claude Code 以为有 1M，**从不触发自动压缩**，涨到 68918 才被上游拒：`maximum context length is 65536 tokens` | **按模型真实 ctx 填窗口**：先查上表 context_length，再设 `AUTO_COMPACT_WINDOW ≈ 真实值 - 8000`；同时设 `CLAUDE_CODE_MAX_OUTPUT_TOKENS=16000`（默认预留 32000 会白占一半预算）。例：LFM65536 → `56000` + `16000` |
 
 ## 内置模型（2026-10-11 实测）
 
 ### 免 key 梯队（Kilo Gateway，无需注册）
-| 模型 id | 端点 | 上下文 | 工具调用 | 读图 |
-|---|---|---|---|---|
-| `kilo-auto/free` | Kilo Gateway | 256k | ✅ | ❌ |
-| `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free` | Kilo Gateway | 256k | ✅ | ✅（base64 图实测可识别） |
-| `nvidia/nemotron-3-ultra-550b-a55b:free` | Kilo Gateway | 1000k | ✅ | ❌ |
+| 模型 id | 端点 | 真实上下文 | 工具调用 | 读图 | 实测（2026-10-13） |
+|---|---|---|---|---|---|
+| **`liquid/lfm-2.5-2.6b:free`** ⭐ | Kilo Gateway | **65536** | ✅ | ❌ | **4/4~5/5 稳定、2.1-3.3s、agentic 两步全对 → 免费 agent 首选** |
+| `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free` | Kilo Gateway | 256k | ✅ | ✅（base64 图实测可识别） | 读图兜底；偶发空回复 |
+| `nvidia/nemotron-3-super-120b-a12b:free` | Kilo Gateway | 262k | ✅ | ❌ | 可用但 3/5（2 次空回复）、波动 2.6-14.4s → 不推荐 |
+| ~~`kilo-auto/free`~~ ⚠️ | Kilo Gateway | **不确定（轮换）** | ✅ | ❌ | **随机轮换池，会抽到重推理模型 → 实测 7min/161token，不要用** |
+| `nvidia/nemotron-3-ultra-550b-a55b:free` | Kilo Gateway | 1000k | ✅ | ❌ | agentic 第 2 步退化，不推荐 |
+
+> **⭐ 最重要的一条**：`kilo-auto/free` 的官方描述就是 "Rotates through available free models"
+> ——它是**随机轮换池**，每次可能给你不同的模型，抽到重推理的就极慢。
+> **正确做法：锁定具体模型 id**（如上面的 LFM2.5），别用 auto 路由。
+> 探网关有什么可选（**免 key**）：
+> ```bash
+> curl -s -H "Authorization: Bearer anonymous" \
+>   https://api.kilo.ai/api/gateway/v1/models | python -c "import json,sys; [print(m['id'],m.get('context_length')) for m in json.load(sys.stdin)['data'] if 'free' in m['id']]"
+> ```
 
 > omni 模型是免费读图兜底：免 key（apiKey 填 `anonymous`）、能读图、能调工具。
 > 注意 reasoning 模型会先吐 reasoning 吃 token，`max_tokens` 给到 ≥1024 否则响应会被截断。
@@ -69,11 +82,19 @@ agent_created: true
 | 平台 | 免费模型 | 状态 | 能力 | 本机可达 |
 |---|---|---|---|---|
 | **智谱 BigModel**（需 key） | GLM-4-Flash / GLM-4.7-Flash / GLM-Z1-Flash / GLM-4V-Flash | ✅ 永久/限时免费 | 文本/工具/推理/读图 | ✅ 直连 200 |
-| **Kilo 网关**（免 key） | kilo-auto/free / nemotron-omni / nemotron-550b | ✅ 稳定 | 文本/工具/读图(omni) | ✅ 307 |
+| **Kilo 网关**（免 key） ⭐ | lfm-2.5-2.6b / nemotron-omni / nemotron-super 等 | ✅ 稳定 | 文本/工具/读图(omni) | ✅ 直连 200 |
 | **硅基流动 SiliconFlow**（需国内手机注册） | GLM 系列蒸馏 / DeepSeek-R1-Distill 等 | ✅ 免费·1K RPM | 文本为主 | 本机暂无 key |
-| **阶跃星辰 StepFun**（需 key，限时免费） | Step 5 Preview（1M ctx·多模态·工具调用·推理） | ✅ 限时免费（平台额度） | 文本/工具/读图/推理全开 | ✅ 直连 200（已实测） |
-| **OpenRouter**（需 key） | 19 个 `:free` 模型 | 列表可达·调用需 key | 多数文本 | ⚠️ 仅列表可达（用户账号被封则无法调用） |
+| **阶跃星辰 StepFun**（需 key，限时免费） | Step 5 Preview（1M ctx·多模态·工具调用·推理） | ⚠️ 限时额度，**耗尽即全模型 402**（2026-10-13 实测三模型同时 402，key 仍有效） | 文本/工具/读图/推理全开 | ✅ 直连 200 |
+| **OpenRouter**（需 key） | 15 个 `:free` 模型 | 列表免 key 200，**推理 401**（"No cookie auth credentials found"） | 多数文本 | ⚠️ 免 key 用不了；但 Kilo 代理了同一目录 |
+| **OpenCode Zen** | grok-code 等 | 列表 404 / 调用 "Model is unavailable" | — | ❌ 需 key |
+| **Cerebras / NVIDIA NIM** | 若干 | 403 / SSL 超时 | — | ❌ 需 key |
 | Groq / Together / HF / Mistral / Google | 各有免费档 | ❌ 国内被 CF/代理封 | — | ❌ 不可达/需 key |
+
+> **2026-10-13 普查结论**：目前**唯一免 key 免注册**能用的聚合网关就是 **Kilo**（它的模型 id 就是
+> OpenRouter 的命名，本质是 OpenRouter 目录的匿名代理）。其他平台都要 key —— 所以要扩免费模型池，
+> 正确路径是**在 Kilo 里换模型 id**，而不是换平台。
+> ⚠️ StepFun 类"限时免费"额度耗尽是**账号级**的：实测 step-5 / 3.5 / 3.7 全变 402，而 `/v1/models`
+> 仍返回 200（key 有效）。所以别把关键工作流挂在限时免费模型上。
 
 **结论**：本机最稳的免费组合 = **GLM-4-Flash（文本+工具）+ GLM-4V-Flash（读图）+ GLM-Z1-Flash（推理）**（智谱一个 key，30 并发，永久免费）+
 **Kilo 两个免 key 模型**作零注册备用。DeepSeek-V4 是**付费**的，自动模式易烧钱，非必要别用。
@@ -87,7 +108,7 @@ python scripts/install_free_llms.py                 # 装 Kilo 免 key 三件套
 python scripts/install_free_llms.py --zhipu-key KEY # 额外装智谱 GLM 永久免费梯队
 ```
 
-建议把 `kilo-auto/free` 或 `glm-4-flash` 设为默认（自动路由 / 最稳）。
+建议把 `liquid/lfm-2.5-2.6b:free`（Claude Code 重活）或 `glm-4-flash`（日常对话）设为默认。**别用 `kilo-auto/free`**（随机轮换池，会抽到极慢的模型）。
 
 ### 场景 B：用户要验证已有配置
 
