@@ -2,7 +2,7 @@
 name: free-llm-installer
 slug: free-llm-installer
 displayName: 免费 LLM 一键安装
-version: 1.1.7
+version: 1.1.8
 description: 一键安装并实测验证已验证可用的免费 LLM 到 WorkBuddy/Claude Code，无需注册、无需 API Key。当用户说「装免费模型」「加免费模型」「免费 LLM」「免费模型一键装」「验证免费模型可用吗」「免费模型怎么接入」「帮我配几个免费模型」「监控免费模型」「免费模型挂了吗」「kilo 网关」「kilo-auto」「nemotron 免费」「space-bunny」「智谱 glm 免费」「zhipu 免费」「glm-4-flash」「glm-4.7-flash」「glm-z1-flash」「glm-4v-flash」「探测国外免费模型」「国外平台免费 llm」「优先用免费模型」「读图桥接」「vision bridge」「给 glm-4-flash 加读图」「不读图的模型怎么看图」「阶跃星辰」「stepfun」「step 5」「step-5-preview」「限时免费模型」「ccproxy 读图转发」「给 claude code 加读图」时使用。也用于验证已有免费模型配置是否真的可用（tool calling 是否支持、是否限流、是否支持读图），以及定期 watch 监控免费模型是否下线/限流/失去工具调用能力。
 agent_created: true
 ---
@@ -36,6 +36,7 @@ agent_created: true
 | **`kilo-auto/free` 是随机轮换池（2026-10-13 实测）** | 它会轮换免费模型，抽到重推理模型时 **7 分 30 秒只出 161 token** 就报错；同一 prompt 有时 3s 有时 7min | **不要用 auto 路由，锁定具体模型 id**（`liquid/lfm-2.5-2.6b:free` 实测 5/5 稳定、2-3.3s、agentic 两步全对，完胜 120B/550B 大模型）。代理参数无需动——问题在模型选择不在参数 |
 | **上下文窗口照抄大模型 → 400 爆上下文（2026-10-13 踩到）** | 给 64k 的 `liquid/lfm-2.5-2.6b:free` 填了 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000`（照抄 Step5 的 1M）→ Claude Code 以为有 1M，**从不触发自动压缩**，涨到 68918 才被上游拒：`maximum context length is 65536 tokens` | **按模型真实 ctx 填窗口**：先查上表 context_length，再设 `AUTO_COMPACT_WINDOW ≈ 真实值 - 8000`；同时设 `CLAUDE_CODE_MAX_OUTPUT_TOKENS=16000`（默认预留 32000 会白占一半预算）。例：LFM65536 → `56000` + `16000` |
 | **auto-mode 校验器跑在会话模型上 → 慢模型把工具全堵死（2026-10-13 踩到）** | Claude Code auto mode 的安全校验用**会话模型**判定 Bash/WebFetch 是否安全；会话模型是免费共享档时抖动超时，报 `X is temporarily unavailable (timed out), so auto mode cannot determine the safety of Bash`，**所有需审批动作全被卡死** | 三条路：① 会话模型换 DeepSeek 等稳定模型；② 用户级 settings 写 `"permissions": {"defaultMode": "default"}` 关掉 auto mode（**逐次手动确认，不调校验器**；只认用户级来源，项目级无效；切换器不碰这个键所以切模型不会丢）；③ 想让校验器用快模型得让桥接支持按模型名分流多上游——`CLAUDE_CODE_AUTO_MODE_MODEL` 这个env 存在但未公开，且 `ccproxy --model` 会强制覆盖所有模型名，设了也无效 |
+| **SSL: UNEXPECTED_EOF_WHILE_READING（2026-10-14 踩到，误判成模型失效）** | 报`upstream connect failed: [SSL: UNEXPECTED_EOF_WHILE_READING]`，第一反应以为模型下架/欠费——其实**模型好好的**（直连2-4s 正常）。真凶是 `~/.claude-code-proxy.json` 里 `upstream.proxies` 指向了**已失效的本地代理端口**（实测 10808 端口在监听但对该站 TLS 100% 打断，7022 端口直接不通 = failover 备份也是死的） | **先怀疑代理链路，别急着换模型**。三路对比定位（direct / 环境代理 / 配置代理各打一次，见下方诊断），然后 `--proxy ""` 强制直连（清空 proxies 池）；VPN 是 TUN 模式时直连就等于已走隧道，**再套一层本地代理反而坏事**。本地代理端口会随 VPN 客户端重启/换节点漂移，`upstream.proxies` 属易腐配置 |
 
 ## 内置模型（2026-10-11 实测）
 
@@ -310,6 +311,47 @@ python scripts/install_free_llms.py --watch --watch-log /path/to/watch.log
 - **原子写入**：先写 `.tmp` 再 `os.replace`，避免写一半损坏。
 - **每次写入前自动备份**到 `backups/models.json.bak-install-free-<时间戳>`。
 - **网络抖动重试**：SSL 中断等 `NET` 类错误自动重试 2 次（间隔 3s）；429 在工具验证阶段重试 2 次（间隔 8s）。
+
+## 故障诊断：SSL: UNEXPECTED_EOF_WHILE_READING
+
+报这个错时**先怀疑代理链路，不要先怀疑模型**（2026-10-14 踩坑：误以为模型下架，实测模型完全正常）。
+`~/.claude-code-proxy.json` 的 `upstream.proxies` 是**易腐配置**——本地代理端口会随 VPN 客户端
+重启/换节点漂移，出现「端口还在监听但对该站 TLS 握手必断」的情况。
+
+**三路对比定位**（一次跑完就知道是哪条链路坏）：
+
+```bash
+python - <<'PY'
+import json, time, urllib.request
+URL='https://api.kilo.ai/api/gateway/v1/chat/completions'
+BODY=json.dumps({'model':'liquid/lfm-2.5-2.6b:free','max_tokens':200,
+                 'messages':[{'role':'user','content':'hi'}]}).encode()
+def t(label, opener):
+    t0=time.time()
+    try:
+        r=urllib.request.Request(URL,data=BODY,headers={'content-type':'application/json',
+                          'Authorization':'Bearer anonymous'})
+        with opener.open(r,timeout=45) as resp: resp.read()
+        print('%-18s %.1fs OK' % (label,time.time()-t0))
+    except Exception as e:
+        print('%-18s FAIL %s: %s' % (label,type(e).__name__,str(e)[:70]))
+t('direct',   urllib.request.build_opener(urllib.request.ProxyHandler({})))
+t('env-proxy',urllib.request.build_opener(urllib.request.ProxyHandler()))
+PY
+```
+
+再单独试配置里那个代理端口（换成实际端口号），哪条 FAIL 就是哪条的问题。
+
+**修复**：启动时加 `--proxy ""`（强制直连、忽略环境变量、清空 proxies 池）：
+
+```bash
+python tools/ccproxy.py --port 3461 \
+  --upstream https://api.kilo.ai/api/gateway/v1/chat/completions \
+  --model liquid/lfm-2.5-2.6b:free --key anonymous --proxy ""
+```
+
+启动日志会打印 `[ccproxy] upstream route: direct`（或代理列表）确认生效。
+VPN 是 TUN 透明模式时直连就等于已走隧道，不需要再套一层本地代理。
 - **非法 JSON 拒绝写入**：配置损坏时报错退出，不覆盖用户数据。
 - **必须带浏览器 UA**：Kilo / Zen 前有 Cloudflare，Python 默认 UA 会被拦。
 - **推理模型 token 预算**：verify/probe 对 `supportsReasoning` 模型自动放大 `max_tokens`，避免 reasoning 截断。

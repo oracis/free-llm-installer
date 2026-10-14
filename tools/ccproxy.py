@@ -56,6 +56,11 @@ DEFAULT_CONFIG = {
         #                                            / ALL_PROXY, else DIRECT
         # "proxy": "" (empty string) forces DIRECT and ignores the environment.
         # NOTE: NO_PROXY is never consulted.
+        # WARNING: a stale "proxies" entry is the #1 cause of
+        # "SSL: UNEXPECTED_EOF_WHILE_READING" -- local proxy ports move when the
+        # VPN client restarts or switches nodes, and a listener that is still up
+        # can still break TLS for a given host. When in doubt use `--proxy ""`
+        # (or delete the pool) and let the environment decide.
         "proxy_strategy": "failover",
     },
     # StepFun-style reasoning models answer with the thinking chain in
@@ -1512,6 +1517,13 @@ def main():
     ap.add_argument("--retry-empty", type=int,
                     help="Retry an upstream 200 with empty content up to N extra "
                          "times (StepFun flaky-empty workaround). Overrides config.")
+    ap.add_argument("--proxy", default=None,
+                    help="Route upstream calls through this proxy, e.g. "
+                         "http://127.0.0.1:10808. Pass an EMPTY string (--proxy \"\") "
+                         "to force DIRECT and ignore HTTPS_PROXY/HTTP_PROXY -- use "
+                         "that when a stale local proxy breaks TLS and you get "
+                         "'SSL: UNEXPECTED_EOF_WHILE_READING'. Clears any "
+                         "upstream.proxies pool. Overrides config.")
     args = ap.parse_args()
 
     CONFIG = load_config()
@@ -1525,6 +1537,9 @@ def main():
         CONFIG["upstream"]["model"] = args.model
     if args.key is not None:
         CONFIG["upstream"]["api_key"] = args.key
+    if args.proxy is not None:
+        CONFIG["upstream"]["proxy"] = args.proxy
+        CONFIG["upstream"].pop("proxies", None)
     if args.verbose:
         CONFIG["verbose"] = True
     if args.no_reasoning:
