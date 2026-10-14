@@ -160,7 +160,7 @@ class App(tk.Tk):
             if pbase == cur_base and pmodel == cur_model and pbridge == has_bridge:
                 cur_disp = disp
                 break
-        self.status.config(text=f"当前：{cur_disp}\n切换后请重启 Claude Code", fg="blue")
+        self.status.config(text=f"当前：{cur_disp}\n切换后重启 Claude Code；想保留上下文重启时加 --continue", fg="blue")
 
     def on_click(self, disp, prof, port, args):
         try:
@@ -173,7 +173,12 @@ class App(tk.Tk):
                     "然后在 Claude Code 的 profile / models.json 里同样填该 key。")
                 return
             msg = switch(prof, port, args)
-            messagebox.showinfo("已切换", f"已切换到：{disp}\n{msg}\n\n请重启 Claude Code。")
+            messagebox.showinfo(
+                "已切换",
+                f"已切换到：{disp}\n{msg}\n\n"
+                f"重启 Claude Code 后生效。\n"
+                f"想接着之前的对话继续：重启时用 claude --continue\n"
+                f"（换模型不会丢会话，历史都在 ~/.claude/projects/）")
             self.refresh()
         except Exception as e:
             messagebox.showerror("失败", str(e))
