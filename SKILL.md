@@ -2,7 +2,7 @@
 name: free-llm-installer
 slug: free-llm-installer
 displayName: 免费 LLM 一键安装
-version: 1.1.8
+version: 1.1.9
 description: 一键安装并实测验证已验证可用的免费 LLM 到 WorkBuddy/Claude Code，无需注册、无需 API Key。当用户说「装免费模型」「加免费模型」「免费 LLM」「免费模型一键装」「验证免费模型可用吗」「免费模型怎么接入」「帮我配几个免费模型」「监控免费模型」「免费模型挂了吗」「kilo 网关」「kilo-auto」「nemotron 免费」「space-bunny」「智谱 glm 免费」「zhipu 免费」「glm-4-flash」「glm-4.7-flash」「glm-z1-flash」「glm-4v-flash」「探测国外免费模型」「国外平台免费 llm」「优先用免费模型」「读图桥接」「vision bridge」「给 glm-4-flash 加读图」「不读图的模型怎么看图」「阶跃星辰」「stepfun」「step 5」「step-5-preview」「限时免费模型」「ccproxy 读图转发」「给 claude code 加读图」时使用。也用于验证已有免费模型配置是否真的可用（tool calling 是否支持、是否限流、是否支持读图），以及定期 watch 监控免费模型是否下线/限流/失去工具调用能力。
 agent_created: true
 ---
@@ -36,7 +36,8 @@ agent_created: true
 | **`kilo-auto/free` 是随机轮换池（2026-10-13 实测）** | 它会轮换免费模型，抽到重推理模型时 **7 分 30 秒只出 161 token** 就报错；同一 prompt 有时 3s 有时 7min | **不要用 auto 路由，锁定具体模型 id**（`liquid/lfm-2.5-2.6b:free` 实测 5/5 稳定、2-3.3s、agentic 两步全对，完胜 120B/550B 大模型）。代理参数无需动——问题在模型选择不在参数 |
 | **上下文窗口照抄大模型 → 400 爆上下文（2026-10-13 踩到）** | 给 64k 的 `liquid/lfm-2.5-2.6b:free` 填了 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000`（照抄 Step5 的 1M）→ Claude Code 以为有 1M，**从不触发自动压缩**，涨到 68918 才被上游拒：`maximum context length is 65536 tokens` | **按模型真实 ctx 填窗口**：先查上表 context_length，再设 `AUTO_COMPACT_WINDOW ≈ 真实值 - 8000`；同时设 `CLAUDE_CODE_MAX_OUTPUT_TOKENS=16000`（默认预留 32000 会白占一半预算）。例：LFM65536 → `56000` + `16000` |
 | **auto-mode 校验器跑在会话模型上 → 慢模型把工具全堵死（2026-10-13 踩到）** | Claude Code auto mode 的安全校验用**会话模型**判定 Bash/WebFetch 是否安全；会话模型是免费共享档时抖动超时，报 `X is temporarily unavailable (timed out), so auto mode cannot determine the safety of Bash`，**所有需审批动作全被卡死** | 三条路：① 会话模型换 DeepSeek 等稳定模型；② 用户级 settings 写 `"permissions": {"defaultMode": "default"}` 关掉 auto mode（**逐次手动确认，不调校验器**；只认用户级来源，项目级无效；切换器不碰这个键所以切模型不会丢）；③ 想让校验器用快模型得让桥接支持按模型名分流多上游——`CLAUDE_CODE_AUTO_MODE_MODEL` 这个env 存在但未公开，且 `ccproxy --model` 会强制覆盖所有模型名，设了也无效 |
-| **SSL: UNEXPECTED_EOF_WHILE_READING（2026-10-14 踩到，误判成模型失效）** | 报`upstream connect failed: [SSL: UNEXPECTED_EOF_WHILE_READING]`，第一反应以为模型下架/欠费——其实**模型好好的**（直连2-4s 正常）。真凶是 `~/.claude-code-proxy.json` 里 `upstream.proxies` 指向了**已失效的本地代理端口**（实测 10808 端口在监听但对该站 TLS 100% 打断，7022 端口直接不通 = failover 备份也是死的） | **先怀疑代理链路，别急着换模型**。三路对比定位（direct / 环境代理 / 配置代理各打一次，见下方诊断），然后 `--proxy ""` 强制直连（清空 proxies 池）；VPN 是 TUN 模式时直连就等于已走隧道，**再套一层本地代理反而坏事**。本地代理端口会随 VPN 客户端重启/换节点漂移，`upstream.proxies` 属易腐配置 |
+| **SSL: UNEXPECTED_EOF_WHILE_READING（2026-10-14 踩到，误判成模型失效）** | 报`upstream connect failed: [SSL: UNEXPECTED_EOF_WHILE_READING]`，第一反应以为模型下架/欠费——其实**模型好好的**（直连2-4s 正常）。真凶是代理配错了，**最常见是把 SOCKS5 端口写成 `http://`**（如 `http.proxy=http://127.0.0.1:10808` 而 10808 其实是 Shadowsocks 的 SOCKS5 端口）→ TLS 握手必断 | **先怀疑代理链路，别急着换模型**。① 查端口到进程的映射再判断：`http://` 只对 HTTP 代理端口（Shadowsocks 的 `ss_privoxy` HTTP 桥之类），SOCKS5 端口要用 `socks5h://`（**注意 ccproxy 基于 urllib，不支持 socks**）② 找端口：PowerShell `Get-NetTCPConnection -State Listen` + `Get-Process` ③ 直接最省事：`--proxy ""` 强制直连 ④ `git push` 报同样错就查 `~/.gitconfig` 的 `http.proxy`，设成**空字符串**（删掉会回落到环境变量） |
+| **git push 报 TLS EOF（2026-10-14 长期问题根因）** | 本机 git 一直报 `TLS connect error: ...unexpected eof while reading`，换网络/换命令都无效 | 根因是 `~/.gitconfig` 里写死了 `http.proxy=http://127.0.0.1:<SOCKS5端口>`。修复：`git config --global http.proxy ""` 和 `https.proxy ""`（**必须空字符串**；`--unset` 后 git 会回落到环境变量）。验证：直连 `git ls-remote` 多次全OK 即坐实。另：`env -u *_proxy` 对 git **无效**，git 只认自己的 config |
 
 ## 内置模型（2026-10-11 实测）
 

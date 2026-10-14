@@ -56,11 +56,12 @@ DEFAULT_CONFIG = {
         #                                            / ALL_PROXY, else DIRECT
         # "proxy": "" (empty string) forces DIRECT and ignores the environment.
         # NOTE: NO_PROXY is never consulted.
-        # WARNING: a stale "proxies" entry is the #1 cause of
-        # "SSL: UNEXPECTED_EOF_WHILE_READING" -- local proxy ports move when the
-        # VPN client restarts or switches nodes, and a listener that is still up
-        # can still break TLS for a given host. When in doubt use `--proxy ""`
-        # (or delete the pool) and let the environment decide.
+        # WARNING: the #1 cause of"SSL: UNEXPECTED_EOF_WHILE_READING" is a proxy
+        # entry with the WRONG PROTOCOL -- typically a SOCKS5 port (Shadowsocks
+        # 10808, v2ray 10809, ...) written as "http://...". An http:// URL against
+        # a SOCKS listener breaks the TLS handshake every time. This bridge is
+        # built on urllib, which cannot speak SOCKS at all: use the SOCKS client's
+        # own HTTP bridge port, or just pass `--proxy ""` and go direct.
         "proxy_strategy": "failover",
     },
     # StepFun-style reasoning models answer with the thinking chain in
