@@ -15,11 +15,10 @@
 | Kilo Gateway (免 key) | kilo-auto/free                | ✅ | ❌ | 自动路由，首选 |
 | Kilo Gateway (免 key) | nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free | ✅ | ✅ | 免费读图兜底 |
 | Kilo Gateway (免 key) | nvidia/nemotron-3-ultra-550b-a55b:free | ✅ | ❌ | 大模型 |
+| 智谱 BigModel (需 key·永久免费) | glm-4-flash        | ✅ | ❌ | 日常主力·最稳 |
 | 智谱 BigModel (需 key·免费)     | glm-4.7-flash      | ✅ | ❌ | 带推理·高峰易 429 |
 | 智谱 BigModel (需 key·免费)     | glm-z1-flash       | ❌ | ❌ | 纯推理(数学/代码)，不输出结构化工具 |
 | 智谱 BigModel (需 key·永久免费) | glm-4v-flash       | ❌ | ✅ | 免费读图·无工具 |
-| 智谱 BigModel (需 key·免费)     | glm-4.1v-thinking-flash | ❌ | ✅ | 视觉+推理最强，但工具调用是智谱自定义「文本框」格式(非标准 tool_calls)，不能用于 agent；读图实测可用 |
-| 智谱 BigModel (需 key·免费)     | glm-4.6v-flash     | ❌ | ✅ | 与 4.1v 同为视觉模型，但服务端极不稳定(实测连续 1305/500)，工具调用格式同为文本框。暂不可用，不加 |
 
 ⚠️ space-bunny-free (OpenCode Zen) 已于 2026-10-11 被上游封 API 直连（403
    "free tier can only be used from within OpenCode"），已从默认清单移除。
@@ -65,6 +64,7 @@ from __future__ import print_function
 import argparse
 import json
 import os
+import shutil
 import socket
 import sys
 import time
@@ -77,6 +77,9 @@ import urllib.request
 
 KILO_URL = "https://api.kilo.ai/api/gateway/v1/chat/completions"
 ZEN_URL = "https://opencode.ai/zen/v1/chat/completions"
+ZEN_MODELS_URL = "https://opencode.ai/zen/v1/models"
+# OpenCode Zen 目录里免 key 可拉的模型清单；免费模型 = id 以 -free 结尾，外加少数无后缀的 stealth 免费模型
+ZEN_STEALTH_FREE = ("big-pickle",)
 ZHIPU_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
 STEPFUN_URL = "https://api.stepfun.com/v1/chat/completions"
 
@@ -497,6 +500,193 @@ def probe_foreign(verbose=False):
 
 
 # ---------------------------------------------------------------------------
+# OpenCode Zen 免费通道探测
+# ---------------------------------------------------------------------------
+
+def _detect_opencode_client():
+    """返回 (已安装: bool, 路径: str)。"""
+    win = os.path.join(os.path.expanduser("~"), ".opencode", "bin",
+                       "opencode.exe")
+    if os.path.isfile(win):
+        return True, win
+    p = shutil.which("opencode")
+    if p:
+        return True, p
+    for cand in (
+        os.path.join(os.path.expanduser("~"), ".opencode", "bin", "opencode"),
+        "/usr/local/bin/opencode",
+    ):
+        if os.path.isfile(cand):
+            return True, cand
+    return False, ""
+
+
+# OpenCode Zen 免费模型识别的辅助：拉目录 + 逐个分类
+ZEN_FREE_STATE = os.path.join(os.path.expanduser("~"), ".workbuddy",
+                              "opencode_zen_state.json")
+
+
+def _zen_fetch_free_catalog():
+    """拉 Zen 目录（免 key），返回当前免费模型 id 列表。失败抛异常。"""
+    req = urllib.request.Request(ZEN_MODELS_URL, headers={"User-Agent": UA})
+    data = json.loads(urllib.request.urlopen(req, timeout=20).read())
+    ids = [m.get("id") for m in data.get("data", []) if m.get("id")]
+    free = sorted(i for i in ids
+                  if i.endswith("-free") or i in ZEN_STEALTH_FREE)
+    return ids, free
+
+
+def _zen_classify(mid):
+    """直连探测单个 Zen 免费模型，返回 (状态, 说明)。
+
+    状态：OK(直连可用) / GEO(地区封锁·所在地区不可用) / GATED(需客户端内用) /
+          RATELIMIT(限流) / DOWN(已下线) / PAID(需付费鉴权) / ERROR / NET
+
+    ⚠️ 两种 403 必须区分（2026-10-16 实测），否则会把「根本用不了」误报成可用：
+      · "This model is not available in your country"
+        → 地区封锁。**在 opencode 客户端内同样不可用**，对大陆用户等于没有。
+      · "free tier can only be used from within OpenCode"
+        → 仅限客户端内调用，客户端内可用，直连 403 属预期、非故障。
+    """
+    st, data = _post(ZEN_URL, "", {
+        "model": mid,
+        "messages": [{"role": "user", "content": "ping"}],
+        "max_tokens": 8,
+    }, timeout=20)
+    if st == "OK":
+        return "OK", "直连 200 可用"
+    if st == "RATELIMIT":
+        return "RATELIMIT", "429 限流（非故障）"
+    if st == "NET":
+        return "NET", (data if isinstance(data, str) else str(data))[:70]
+    det = data if isinstance(data, str) else str(data)
+    low = det.lower()
+    # 顺序关键：地区封锁的文案同样含 "403"，必须先判 GEO
+    if "your country" in low or "not available in your region" in low:
+        return "GEO", "地区封锁：所在地区不可用（客户端内也不可用）"
+    if "within opencode" in low or "free tier" in low or "403" in det:
+        return "GATED", "仅客户端内可用（直连 403 属预期）"
+    if "400" in det and ("unavailable" in low or "not found" in low):
+        return "DOWN", "目录外/已下线：%s" % det[:40]
+    if "401" in det:
+        return "PAID", "需付费鉴权（已转收费）：%s" % det[:40]
+    return "ERROR", det[:70]
+
+
+def _zen_diff(free_now):
+    """与上次巡检对比免费模型集合，返回 (新增, 消失) 并更新状态文件。"""
+    prev = []
+    try:
+        with open(ZEN_FREE_STATE, "r", encoding="utf-8") as f:
+            prev = json.load(f).get("free_models", [])
+    except Exception:
+        prev = []
+    added = [m for m in free_now if m not in prev]
+    removed = [m for m in prev if m not in free_now]
+    try:
+        with open(ZEN_FREE_STATE, "w", encoding="utf-8") as f:
+            json.dump({"free_models": free_now,
+                       "updated": time.strftime("%Y-%m-%d %H:%M:%S")},
+                      f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+    return added, removed
+
+
+def probe_opencode_zen(verbose=False):
+    """OpenCode Zen 免费通道探测（巡检 [3] 段用）。
+
+    Zen 免费层自 2026-10-11 起封 API 直连（403 FreeTierError "free tier can
+    only be used from within OpenCode"），所以本函数**不要求直连可用**：
+      · 直连 403(FreeTierError) = 模型存在，须在 OpenCode 客户端内使用，非故障
+      · 直连 400"Model is unavailable" = 该模型已从免免费目录撤下 → 下线
+      · 直连 401 = 已转收费
+
+    输出：当前 Zen 免费模型清单 + 逐个实时状态 + 与上次巡检的变化。
+    返回状态字符串：OK / DEGRADED / DOWN / NET / ERROR
+    """
+    print("=" * 74)
+    print("OpenCode Zen 免费通道探测（%s）" % time.strftime("%Y-%m-%d %H:%M:%S"))
+    print("=" * 74)
+
+    installed, path = _detect_opencode_client()
+    print("  [客户端] %s" % ("已安装：%s" % path if installed
+                             else "未检测到 opencode（PATH 与 ~/.opencode 均无）"))
+
+    try:
+        total, free = _zen_fetch_free_catalog()
+        print("  [目录] %s 可达，共 %d 个模型，其中免费 %d 个"
+              % (ZEN_MODELS_URL, len(total), len(free)))
+    except Exception as e:
+        print("  [目录] 拉取失败：%s" % str(e)[:80])
+        print("  结论：Zen 目录不可达（%s）" % type(e).__name__)
+        return "NET"
+
+    if not free:
+        print("  结论：目录可达，但当前没有任何免费模型（免费档可能已整体下线）。")
+        _zen_diff([])
+        return "DOWN"
+
+    print("\n  %-34s %-10s %s" % ("免费模型", "状态", "说明"))
+    print("  " + "-" * 74)
+    counts = {}
+    by_status = {}
+    for mid in free:
+        st, note = _zen_classify(mid)
+        counts[st] = counts.get(st, 0) + 1
+        by_status.setdefault(st, []).append(mid)
+        label = {
+            "OK": "直连可用", "GEO": "地区封锁", "GATED": "需客户端",
+            "RATELIMIT": "限流", "DOWN": "已下线", "PAID": "转收费",
+            "ERROR": "异常", "NET": "不可达",
+        }.get(st, st)
+        print("  %-34s %-10s %s" % (mid[:34], label, note[:52]))
+        sys.stdout.flush()
+        time.sleep(0.4)
+
+    # 地区封锁(GEO)不计入可用：对所在地区用户等于不存在
+    usable = counts.get("OK", 0) + counts.get("GATED", 0) + counts.get("RATELIMIT", 0)
+    print("\n  当前地区可用 %d / %d（直连 %d · 需客户端 %d · 限流 %d）"
+          % (usable, len(free), counts.get("OK", 0), counts.get("GATED", 0),
+             counts.get("RATELIMIT", 0)))
+    if counts.get("GEO"):
+        print("  地区封锁 %d 个（客户端内也不可用）：%s"
+              % (counts["GEO"], ", ".join(by_status["GEO"])))
+    if counts.get("DOWN"):
+        print("  已下线 %d 个（上游撤出免费档）：%s"
+              % (counts["DOWN"], ", ".join(by_status["DOWN"])))
+    if counts.get("PAID"):
+        print("  已转收费 %d 个（别误用）：%s"
+              % (counts["PAID"], ", ".join(by_status["PAID"])))
+
+    added, removed = _zen_diff(free)
+    if added:
+        print("  较上次新增：%s" % ", ".join(added))
+    if removed:
+        print("  较上次消失：%s" % ", ".join(removed))
+    if not added and not removed:
+        print("  较上次：无变化")
+
+    if usable == 0:
+        print("  结论：当前所在地区取不到任何可用的 Zen 免费模型。")
+        return "GEO_BLOCKED" if counts.get("GEO") else "DOWN"
+    if installed:
+        print("  结论：%d 个免费模型可在 opencode 客户端内使用；"
+              "直连 403 属预期、非故障。" % usable)
+        if by_status.get("GATED"):
+            print("  手动试用：opencode run -m opencode/%s \"ping\""
+                  % by_status["GATED"][0])
+    else:
+        print("  注意：本机未检测到 opencode 客户端，即使模型可用也无法实际使用。")
+
+    if counts.get("DOWN") or counts.get("PAID"):
+        return "DEGRADED"
+    if counts.get("ERROR") or counts.get("NET"):
+        return "ERROR"
+    return "OK"
+
+
+# ---------------------------------------------------------------------------
 # watch 模式
 # ---------------------------------------------------------------------------
 
@@ -667,13 +857,6 @@ def build_targets(args):
                         supports_reasoning=True, supports_tool=False),
             zhipu_model("glm-4v-flash", "GLM-4V-Flash (Free·读图)",
                         supports_images=True, supports_tool=False),
-            # 4.1v-thinking-flash: 视觉+推理最强，但工具调用是智谱自定义「文本框」格式
-            # （<|begin_of_box|>...<|end_of_box|>），非标准 tool_calls → supports_tool=False。
-            # 仅 WorkBuddy 聊天/读图用，不进 Claude Code 切换器。
-            zhipu_model("glm-4.1v-thinking-flash", "GLM-4.1V-Thinking-Flash (Free·视觉推理)",
-                        supports_images=True, supports_reasoning=True, supports_tool=False),
-            # 4.6v-flash: 与 4.1v 同为视觉模型，但服务端极不稳定（实测连续 1305/500），
-            # 工具调用格式同为文本框。暂不可用，不加入默认清单。
         ]
     if args.deepseek_key:
         targets.append({
@@ -781,40 +964,61 @@ def do_verify(args):
 
 
 def do_report(args):
-    """一轮体检（验证全部托管模型）+ 国外免费模型探测，输出汇总。"""
+    """一轮体检（验证全部托管模型）+ 国外免费模型探测 + OpenCode 通道，输出汇总。
+
+    OpenCode Zen 通道（[3]）**独立于** Kilo/智谱托管模型，即便本机没装
+    Kilo/智谱模型也会照常探测，避免漏报这条免费通道。
+    """
     path = args.models
     models = load_models(path)
     managed = [m for m in models
                if isinstance(m, dict) and m.get("vendor") in OWNED_VENDORS]
-    if not managed:
-        print("配置里没有本脚本管理的模型。先运行：python install_free_llms.py")
-        return 1
 
     print("=" * 74)
     print("免费模型一周/每日体检（%s）" % time.strftime("%Y-%m-%d %H:%M:%S"))
     print("=" * 74)
     print("\n[1] 已装免费模型连通性 / 工具调用验证\n")
-    print("%-46s %-7s %s" % ("MODEL ID", "结果", "详情"))
-    print("-" * 100)
-    passed, failed = [], []
-    for m in managed:
-        ok, det = verify_model(m)
-        print("%-46s %-7s %s" % (str(m.get("id"))[:46],
-                                "OK" if ok else "FAIL", det[:46]))
-        sys.stdout.flush()
-        (passed if ok else failed).append(m.get("id"))
-        time.sleep(0.8)
-    print("\n通过 %d / %d" % (len(passed), len(managed)))
+    if not managed:
+        print("  配置里没有本脚本管理的模型（Kilo/智谱）。如需体检先运行：")
+        print("  python install_free_llms.py  [--zhipu-key KEY]")
+        passed, failed = [], []
+    else:
+        print("%-46s %-7s %s" % ("MODEL ID", "结果", "详情"))
+        print("-" * 100)
+        passed, failed = [], []
+        for m in managed:
+            ok, det = verify_model(m)
+            print("%-46s %-7s %s" % (str(m.get("id"))[:46],
+                                    "OK" if ok else "FAIL", det[:46]))
+            sys.stdout.flush()
+            (passed if ok else failed).append(m.get("id"))
+            time.sleep(0.8)
+        print("\n通过 %d / %d" % (len(passed), len(managed)))
 
     print("\n[2] 国外平台免费 LLM 探测")
     probe_foreign()
+
+    print("\n[3] OpenCode Zen 免费通道")
+    oc_status = probe_opencode_zen()
 
     print("\n[汇总]")
     print("  本机免费模型：可用 %d / %d" % (len(passed), len(managed)))
     if failed:
         print("  异常：%s" % ", ".join(failed))
         print("  → 多为高峰限流，稍后重跑 --verify 再判断；确属下线再清理。")
-    return 0 if not failed else 2
+    oc_label = {
+        "OK": "可用（免费模型均在架，需经 OpenCode 客户端调用）",
+        "DEGRADED": "部分变化（有模型下线/转收费，见 [3] 段）",
+        "GEO_BLOCKED": "当前地区取不到任何可用免费模型（见 [3] 段封锁名单）",
+        "DOWN": "免费档已整体下线",
+        "ERROR": "异常",
+        "NET": "不可达（目录拉取失败）",
+    }.get(oc_status, oc_status)
+    print("  OpenCode Zen 通道：%s" % oc_label)
+    rc = 0 if not failed else 2
+    if oc_status in ("DOWN", "ERROR", "GEO_BLOCKED", "DEGRADED"):
+        rc = max(rc, 2)
+    return rc
 
 
 def do_refresh(args):

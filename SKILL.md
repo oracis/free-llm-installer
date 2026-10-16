@@ -2,7 +2,7 @@
 name: free-llm-installer
 slug: free-llm-installer
 displayName: 免费 LLM 一键安装
-version: 1.2.0
+version: 1.3.0
 description: 一键安装并实测验证已验证可用的免费 LLM 到 WorkBuddy/Claude Code，无需注册、无需 API Key。当用户说「装免费模型」「加免费模型」「免费 LLM」「免费模型一键装」「验证免费模型可用吗」「免费模型怎么接入」「帮我配几个免费模型」「监控免费模型」「免费模型挂了吗」「kilo 网关」「kilo-auto」「nemotron 免费」「space-bunny」「智谱 glm 免费」「zhipu 免费」「glm-4-flash」「glm-4.7-flash」「glm-z1-flash」「glm-4v-flash」「探测国外免费模型」「国外平台免费 llm」「优先用免费模型」「读图桥接」「vision bridge」「给 glm-4-flash 加读图」「不读图的模型怎么看图」「阶跃星辰」「stepfun」「step 5」「step-5-preview」「限时免费模型」「ccproxy 读图转发」「给 claude code 加读图」时使用。也用于验证已有免费模型配置是否真的可用（tool calling 是否支持、是否限流、是否支持读图），以及定期 watch 监控免费模型是否下线/限流/失去工具调用能力。
 agent_created: true
 ---
@@ -23,7 +23,8 @@ agent_created: true
 | 假多模态 | 返回 200 但 `image_tokens=0`，模型瞎猜 | Kilo 纯文本模型写 `supportsImages: false`；omni 经 base64 图实测可识别，写 `true` |
 | 假工具调用 | 能对话但从不返回 `tool_calls` | 必须发带 `tools` 的请求实测；glm-z1-flash / glm-4v-flash 不输出结构化工具调用，标记 `supportsToolCall: false` |
 | Cloudflare拦 UA | 403 `code:1010` | 必须带浏览器 User-Agent（脚本已内置） |
-| **Zen 免费层封 API 直连（2026-10-11）** | `space-bunny-free` → 403 "free tier can only be used from within OpenCode" | 上游政策收紧，本地配置无解，**已从默认清单移除**。如需使用需走 OpenCode 客户端 |
+| **Zen 免费层封 API 直连（2026-10-11）** | 免费模型直连 403 | 上游政策收紧，本地配置无解，**已从默认清单移除**。如需使用需走 OpenCode 客户端 |
+| **Zen 的 403 有两种，别混** | `not available in your country` vs `can only be used from within OpenCode` | 前者=**地区封锁，客户端内也不可用**（大陆等于没有）；后者=仅客户端内可用。判 GEO 要放在判 403 之前，否则误报可用 |
 | **WorkBuddy ≥5.8.0 拒纯空白 key** | 单空格 `" "` 被 UI 判为「未配置接口地址或 API key」标红禁用 | Kilo 用 `anonymous`（实测 200，trim 后非空可过校验） |
 | **Kilo 假 key 会 401** | `Bearer free`/`x`/`0` → 401 INVALID_TOKEN | Kilo 匿名 token 只有两个：空串和字面量 `anonymous`。占位一律用 `anonymous` |
 | **智谱免费档高峰过载** | glm-4.7-flash 高峰 429；glm-4.6v-flash 持续 1305「访问量过大」 | 日常用 `glm-4-flash`（永久免费·最稳）；`glm-4.7-flash` 非高峰用；`glm-4.6v-flash` 暂不可用 |
@@ -70,11 +71,9 @@ agent_created: true
 | `glm-4.7-flash` | 免费·高峰易 429 | ✅ | ❌ | ✅ | 带推理·质量更好 |
 | `glm-z1-flash` | 完全免费 | ❌ | ❌ | ✅ | 数学/代码推理，不输出结构化工具（仅聊天/推理用） |
 | `glm-4v-flash` | 永久免费 | ❌ | ✅ | ❌ | 免费读图，无工具（仅聊天/读图用） |
-| `glm-4.1v-thinking-flash` | 免费 | ❌ | ✅ | ✅ | 视觉+推理最强，但工具调用是智谱自定义「文本框」格式（非标准 tool_calls），**不能用于 agent / 不能进切换器**；读图实测可用（仅 WorkBuddy 聊天/读图用） |
-| `glm-4.6v-flash` | 免费·高峰持续 1305/500 | ❌ | ✅ | ❌ | 与 4.1v 同为视觉模型，但服务端极不稳定（实测连续 429→500→429），工具调用格式同为文本框。**暂不可用，不加** |
 
-> **Claude Code 切换器只放支持标准工具调用的模型**（`glm-4-flash` / `glm-4.7-flash`），
-> 因为 Claude Code 靠工具调用干活；z1/v/4.1v/4.6v 都不输出结构化 `tool_calls`，加切换器会断 agent 循环，仅 WorkBuddy 聊天/读图用。
+> **Claude Code 切换器只放支持工具调用的模型**（glm-4-flash / glm-4.7-flash），
+> 因为 Claude Code 靠工具调用干活；z1/v 不加切换器（会断 agent 循环），仅 WorkBuddy 聊天用。
 
 ### 已移除 / 不可用
 - `space-bunny-free`（OpenCode Zen）：2026-10-11 起上游 403 封 API 直连，暂不可用。
@@ -143,8 +142,32 @@ python scripts/install_free_llms.py --report          # 一轮体检 + 国外探
 python scripts/install_free_llms.py --watch           # 常驻后台，状态变化才报告
 ```
 
-`--report` 适合做成自动化（每周跑一次，出变化报告）。
+`--report` 适合做成自动化（每周跑一次，出变化报告）。报告含三段：
+`[1]` 本机已装模型（Kilo/智谱）连通性+工具调用；`[2]` 国外平台（OpenRouter 等）
+免费模型探测；`[3]` **OpenCode Zen 免费通道**——检测 opencode 客户端、拉
+`https://opencode.ai/zen/v1/models` 目录（免鉴权可达）筛出免费模型，并**逐个直连探测**
+判定可用性，与上次巡检对比新增/消失。状态存 `~/.workbuddy/opencode_zen_state.json`。
 `--watch` 长期挂机（Windows 可交给计划任务），每 30 分钟一轮，只在状态变化时打印。
+
+### ⚠️ Zen 免费模型：两类 403 必须区分（2026-10-16 实测）
+
+Zen 免费模型**不能直连调用**，但 403 有两种完全不同的含义，混淆就会把「根本用不了」
+误报成「可用」：
+
+| 403 文案 | 判定 | 含义 |
+|---|---|---|
+| `This model is not available in your country` | **GEO 地区封锁** | **客户端内也不可用**，对大陆用户等于没有 |
+| `free tier can only be used from within OpenCode` | GATED 需客户端 | 仅客户端内调用，客户端内可用，直连 403 属预期 |
+
+判 GEO 必须放在判 403 之前（两条文案都含 403）。GEO 不计入「可用」数；
+若全部免费模型都被封锁，`probe_opencode_zen()` 返回 `GEO_BLOCKED`。
+
+2026-10-16 实测：Zen 共 86 个模型、11 个免费（10 个 `-free` 后缀 + `big-pickle`），
+其中 **8 个需客户端、3 个地区封锁**（`cat-jam-free`、`muse-spark-1.2/1.3-contributor-free`）。
+
+- 免费名单会变动，**以 `--report` 的 `[3]` 段实测为准**，别信文档里的历史名单。
+- 客户端内验证只能人工跑：`opencode run -m opencode/<model> "ping"`。
+  非交互调用在本机会挂死（实测 150s 无输出），**不要塞进定时任务**。
 
 ```bash
 python scripts/install_free_llms.py --watch --watch-interval 1800
